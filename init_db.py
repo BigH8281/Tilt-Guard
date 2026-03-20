@@ -1,12 +1,11 @@
-import app.models  # noqa: F401
-from app.db import Base, engine, ensure_sqlite_schema
+import subprocess
+import sys
 
 
 def init_db() -> None:
-    Base.metadata.create_all(bind=engine)
-    ensure_sqlite_schema()
+    subprocess.run([sys.executable, "-m", "alembic", "upgrade", "head"], check=True)
 
 
 if __name__ == "__main__":
     init_db()
-    print("Database initialized.")
+    print("Database migrated to head.")

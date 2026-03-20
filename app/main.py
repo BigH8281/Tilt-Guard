@@ -6,7 +6,7 @@ from fastapi.staticfiles import StaticFiles
 from sqlalchemy import text
 
 from app.config import CORS_ALLOWED_ORIGINS, FILE_STORAGE_URL_PATH
-from app.db import engine, Base, ensure_sqlite_schema
+from app.db import engine
 from app.routers.auth import router as auth_router
 from app.routers.health import router as health_router
 from app.routers.sessions import router as sessions_router
@@ -15,8 +15,6 @@ from app.storage import FILE_STORAGE_ROOT, ensure_storage_root
 
 @asynccontextmanager
 async def lifespan(_: FastAPI):
-    Base.metadata.create_all(bind=engine)
-    ensure_sqlite_schema()
     with engine.connect() as connection:
         connection.execute(text("SELECT 1"))
     yield

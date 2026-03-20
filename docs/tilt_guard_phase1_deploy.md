@@ -143,16 +143,23 @@ Important current limitation:
 
 1. Provision Postgres.
 2. Provision a persistent filesystem volume for screenshots.
-3. Set backend env vars:
+3. Initialize schema with Alembic:
+   - new empty database:
+     - `python -m alembic upgrade head`
+   - already-live database that already has the current Phase 1 tables:
+     - back up first
+     - verify schema alignment
+     - `python -m alembic stamp 20260320_0001`
+4. Set backend env vars:
    - `JWT_SECRET_KEY`
    - `DATABASE_URL`
    - `CORS_ALLOWED_ORIGINS`
    - `FILE_STORAGE_ROOT`
-4. Install backend dependencies:
+5. Install backend dependencies:
    - `pip install -r requirements.txt`
-5. Run the backend:
+6. Run the backend:
    - `python run_api.py`
-6. Confirm `/health` returns `200` and `{"status":"ok"}`.
+7. Confirm `/health` returns `200` and `{"status":"ok"}`.
 
 ### Frontend
 
@@ -213,6 +220,26 @@ The script validates:
 
 It creates disposable validation data and does not require seeded fixtures.
 
+## Schema Migration Workflow
+
+Tilt-Guard now uses Alembic for schema changes.
+
+Standard commands:
+- upgrade database:
+  - `python -m alembic upgrade head`
+- create a new migration:
+  - `python -m alembic revision -m "describe change"`
+
+Current live-database care point:
+- the first migration in the repo is a baseline migration for the current schema
+- on an already-live database that already has these tables, do a one-time `stamp`, not `upgrade`
+- recommended sequence:
+  - take a backup
+  - verify schema alignment
+  - `python -m alembic stamp 20260320_0001`
+
+Use the explicit live database runbook in [docs/tilt_guard_phase1_live_db_baseline.md](/C:/Users/higgo/Dev/Tilt-Guard/docs/tilt_guard_phase1_live_db_baseline.md).
+
 ## Railway-Style Trial Notes
 
 For a first Railway deployment trial, this repo is closest to:
@@ -243,7 +270,7 @@ This is sufficient for an initial Phase 1 deployment trial.
 
 ## Known Remaining Risks
 
-- There is still no migration system; schema changes rely on `create_all()`.
+- The live Railway database still needs a careful one-time Alembic baseline adoption before future upgrades can use normal migration flow.
 - Screenshot persistence depends on the mounted filesystem volume being configured correctly.
 - There is no object storage fallback.
 - There is no automated deployment verification or test suite.

@@ -36,6 +36,7 @@ if ($activateScript) {
 
 $backendCommands += @(
     "`$env:JWT_SECRET_KEY = '$jwtSecret'",
+    "python -m alembic upgrade head",
     "python -m uvicorn app.main:app --reload"
 )
 

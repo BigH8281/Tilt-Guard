@@ -89,24 +89,39 @@ With that mount path:
 1. Create Railway Postgres.
 2. Create the backend service from repo root.
 3. Attach a Railway volume to the backend service at `/data/uploads`.
-4. Set backend env vars:
+4. Handle the database migration state:
+   - new empty Railway Postgres database:
+     - run `python -m alembic upgrade head`
+   - current already-live Railway database:
+     - back up first
+     - verify schema alignment
+     - run `python -m alembic stamp 20260320_0001`
+   - use the explicit live database runbook:
+     - [docs/tilt_guard_phase1_live_db_baseline.md](/C:/Users/higgo/Dev/Tilt-Guard/docs/tilt_guard_phase1_live_db_baseline.md)
+5. Set backend env vars:
    - `JWT_SECRET_KEY`
    - `DATABASE_URL`
    - `CORS_ALLOWED_ORIGINS`
    - optionally `FILE_STORAGE_ROOT=/data/uploads`
-5. Deploy the backend.
-6. Confirm backend `GET /health` succeeds.
-7. Create the frontend static service from `frontend/`.
-8. Set frontend env var:
+6. Deploy the backend.
+7. Confirm backend `GET /health` succeeds.
+8. Create the frontend static service from `frontend/`.
+9. Set frontend env var:
    - `VITE_API_BASE_URL=https://<backend-domain>`
-9. Deploy the frontend.
-10. Confirm frontend registration, login, session creation, screenshot upload, and session closeout all work.
+10. Deploy the frontend.
+11. Confirm frontend registration, login, session creation, screenshot upload, and session closeout all work.
 
 Optional API-level validation:
 
 - run:
   - `python scripts/validate_phase1_hosted.py --base-url https://<backend-domain>`
 - this validates the hosted-critical Phase 1 API paths directly without browser automation
+
+For future Railway schema updates after the one-time baseline adoption:
+
+- run:
+  - `python -m alembic upgrade head`
+- do this before or alongside the backend rollout for the new release
 
 ## Most Important Railway Checks
 

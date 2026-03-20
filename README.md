@@ -18,6 +18,7 @@ What it does:
 - opens one PowerShell window for the backend
 - activates `.venv` or `venv` if present
 - sets a per-run local `JWT_SECRET_KEY` when needed
+- runs `python -m alembic upgrade head`
 - starts the backend with `python -m uvicorn app.main:app --reload`
 - opens a second PowerShell window for the frontend
 - starts the frontend with `npm.cmd run dev`
@@ -27,6 +28,12 @@ What it does:
 Manual start remains available:
 
 ```powershell
+python -m alembic upgrade head
+python -m uvicorn app.main:app --reload
+```
+
+```powershell
+python init_db.py
 python -m uvicorn app.main:app --reload
 ```
 
@@ -103,6 +110,47 @@ Example same-origin setup behind a reverse proxy:
 - Frontend `VITE_API_BASE_URL` omitted
 
 Environment templates are included at [.env.example](/C:/Users/higgo/Dev/Tilt-Guard/.env.example) and [frontend/.env.example](/C:/Users/higgo/Dev/Tilt-Guard/frontend/.env.example).
+
+## Database Migrations
+
+Tilt-Guard now uses Alembic for schema management.
+
+For the already-live Railway database, use the explicit baseline adoption runbook in [docs/tilt_guard_phase1_live_db_baseline.md](/C:/Users/higgo/Dev/Tilt-Guard/docs/tilt_guard_phase1_live_db_baseline.md).
+
+Local commands:
+
+```powershell
+python -m alembic upgrade head
+```
+
+Create a new migration after model changes:
+
+```powershell
+python -m alembic revision -m "describe change"
+```
+
+For local bootstrap convenience:
+
+```powershell
+python init_db.py
+```
+
+This now runs `alembic upgrade head` instead of `create_all()`.
+
+Important for the already-live Railway database:
+- do not run the baseline migration with `upgrade head` against the existing live database if its tables already exist
+- first take a backup and verify the live schema matches the current Phase 1 schema
+- then do a one-time:
+
+```powershell
+python -m alembic stamp 20260320_0001
+```
+
+- after that one-time stamp, use normal upgrades for future schema changes:
+
+```powershell
+python -m alembic upgrade head
+```
 
 ## Hosted API Validation
 

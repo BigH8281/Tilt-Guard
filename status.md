@@ -37,6 +37,7 @@ Phase 1 - Hosted Journal MVP
 - Local startup is Windows/dev oriented via `start_all.ps1` and `start_all.bat`.
 - README, `.env.example`, `docs/tilt_guard_phase1_deploy.md`, and `docs/tilt_guard_phase1_railway.md` now document the minimal env, assumptions, and verification steps for a first hosted deployment and Railway trial.
 - A minimal API-level Phase 1 validation script now exists for hosted-critical flows and can run against either local or hosted base URLs.
+- Alembic is now set up as the schema migration path for Phase 1, with a baseline migration for the current backend schema.
 
 ## What Is Working
 
@@ -49,6 +50,7 @@ Phase 1 - Hosted Journal MVP
 - Hosted screenshot upload has been tested successfully.
 - Browser access from another device has been confirmed.
 - Minimal automated API validation is now available for health, auth, session flow, screenshot upload, and closeout.
+- Migration-backed startup has been verified against a fresh database using `alembic upgrade head`.
 - User registration, login, and authenticated session lookup are implemented.
 - Users can create one open session at a time, view the open session, and list historical sessions.
 - Guided session setup is implemented for bias, HTF condition, expected open type, and confidence.
@@ -62,7 +64,7 @@ Phase 1 - Hosted Journal MVP
 
 - Screenshot storage is still filesystem-based in Phase 1; object storage is not yet implemented.
 - Hosted deployment is now proven, but Phase 1 still needs hardening around configuration discipline, validation, and operational safety.
-- There is no migration setup; schema changes are handled with `create_all()` plus a small SQLite-specific patch path.
+- The already-live Railway database needs a careful one-time Alembic baseline adoption step before future upgrades can rely on normal migration flow.
 - Automated validation coverage is still narrow and API-level only; there is no broader test suite or browser-level hosted regression coverage yet.
 - Operational monitoring, backup/recovery posture, and repeatable deploy validation are still minimal.
 
