@@ -103,3 +103,31 @@ Example same-origin setup behind a reverse proxy:
 - Frontend `VITE_API_BASE_URL` omitted
 
 Environment templates are included at [.env.example](/C:/Users/higgo/Dev/Tilt-Guard/.env.example) and [frontend/.env.example](/C:/Users/higgo/Dev/Tilt-Guard/frontend/.env.example).
+
+## Hosted API Validation
+
+Run the minimal Phase 1 API validation script against either a local backend or a hosted deployment:
+
+```powershell
+python scripts/validate_phase1_hosted.py --base-url http://127.0.0.1:8000
+```
+
+Against Railway or another hosted API:
+
+```powershell
+python scripts/validate_phase1_hosted.py --base-url https://your-backend-domain
+```
+
+What it validates:
+- `/health`
+- register, login, and `/me`
+- session creation, setup update, and session read-back
+- journal entry creation and journal read-back
+- screenshot upload plus file serving
+- session closeout and closed-session history
+
+Notes:
+- the script creates a disposable user and a disposable session on each run
+- no seeded data is required
+- the target backend must already be running and reachable
+- use `VALIDATION_BASE_URL` or `--base-url` to target a hosted deployment

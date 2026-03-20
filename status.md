@@ -12,9 +12,9 @@ Phase 1 - Hosted Journal MVP
 
 ## Current Objective
 
-- Take the existing local journal flow and make it available online in a browser.
+- Validate and harden the first hosted deployment of the Phase 1 journal MVP.
 - Preserve manual trade recording as the fallback input for now.
-- Improve stability and deployment readiness without leaking into telemetry, enforcement, or AI analysis phases.
+- Improve hosted stability and deployment readiness without leaking into telemetry, enforcement, or AI analysis phases.
 
 ## Confirmed Constraints
 
@@ -33,13 +33,22 @@ Phase 1 - Hosted Journal MVP
 - Screenshot files are now stored via env-configured filesystem storage, with local `uploads/` as the fallback and a configurable mounted path for hosted deployments.
 - Backend runtime now supports env-driven hosted startup via `run_api.py`, `PORT`/`APP_PORT`, and comma-separated CORS origin configuration.
 - Frontend API targeting now supports either explicit `VITE_API_BASE_URL` or same-origin production hosting.
+- The app has completed a successful first Railway deployment trial with both backend and frontend live.
 - Local startup is Windows/dev oriented via `start_all.ps1` and `start_all.bat`.
 - README, `.env.example`, `docs/tilt_guard_phase1_deploy.md`, and `docs/tilt_guard_phase1_railway.md` now document the minimal env, assumptions, and verification steps for a first hosted deployment and Railway trial.
+- A minimal API-level Phase 1 validation script now exists for hosted-critical flows and can run against either local or hosted base URLs.
 
 ## What Is Working
 
 - Backend imports successfully in this workspace.
 - Frontend production build completes successfully with `npm.cmd run build`.
+- Railway backend deployment is live.
+- Railway frontend deployment is live.
+- Hosted auth flow has been tested successfully.
+- Hosted session creation and journal/session flow have been tested successfully.
+- Hosted screenshot upload has been tested successfully.
+- Browser access from another device has been confirmed.
+- Minimal automated API validation is now available for health, auth, session flow, screenshot upload, and closeout.
 - User registration, login, and authenticated session lookup are implemented.
 - Users can create one open session at a time, view the open session, and list historical sessions.
 - Guided session setup is implemented for bias, HTF condition, expected open type, and confidence.
@@ -52,15 +61,15 @@ Phase 1 - Hosted Journal MVP
 ## Known Gaps
 
 - Screenshot storage is still filesystem-based in Phase 1; object storage is not yet implemented.
-- Config is not production-safe yet:
-  hosted env vars still need to be set explicitly, especially `JWT_SECRET_KEY`, `CORS_ALLOWED_ORIGINS`, `DATABASE_URL`, and `FILE_STORAGE_ROOT`.
+- Hosted deployment is now proven, but Phase 1 still needs hardening around configuration discipline, validation, and operational safety.
 - There is no migration setup; schema changes are handled with `create_all()` plus a small SQLite-specific patch path.
-- No app test suite or automated verification coverage is present in the repo outside manual sanity checks.
-- The repo still does not contain full infrastructure provisioning or platform-managed deployment config beyond a minimal backend `Procfile`.
+- Automated validation coverage is still narrow and API-level only; there is no broader test suite or browser-level hosted regression coverage yet.
+- Operational monitoring, backup/recovery posture, and repeatable deploy validation are still minimal.
 
 ## Immediate Next Steps
 
-- Add the smallest deployment-specific config needed for the chosen hosting platform, if required.
+- Harden the hosted Railway deployment path for Phase 1 use.
+- Add the smallest useful automated validation around the hosted-critical flows.
 
 ## Out of Scope Right Now
 

@@ -192,6 +192,27 @@ Important current limitation:
 - Check backend `/health`.
 - Check backend logs for CORS failures, startup errors, or database connection errors.
 
+## Minimal API Validation Script
+
+The repo includes a small API-level validation script for hosted-critical Phase 1 flows:
+
+- script:
+  - `python scripts/validate_phase1_hosted.py --base-url <api-base-url>`
+- default local target:
+  - `http://127.0.0.1:8000`
+- hosted target:
+  - pass the hosted backend URL with `--base-url`
+
+The script validates:
+- `/health`
+- register, login, and `/me`
+- session creation and setup update
+- journal entry write/read-back
+- screenshot upload and file serving
+- session closeout and session history
+
+It creates disposable validation data and does not require seeded fixtures.
+
 ## Railway-Style Trial Notes
 
 For a first Railway deployment trial, this repo is closest to:

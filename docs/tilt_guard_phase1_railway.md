@@ -102,6 +102,12 @@ With that mount path:
 9. Deploy the frontend.
 10. Confirm frontend registration, login, session creation, screenshot upload, and session closeout all work.
 
+Optional API-level validation:
+
+- run:
+  - `python scripts/validate_phase1_hosted.py --base-url https://<backend-domain>`
+- this validates the hosted-critical Phase 1 API paths directly without browser automation
+
 ## Most Important Railway Checks
 
 - The backend is listening successfully on the Railway-assigned `PORT`.
