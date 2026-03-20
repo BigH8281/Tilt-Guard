@@ -179,3 +179,29 @@ Notes:
 - no seeded data is required
 - the target backend must already be running and reachable
 - use `VALIDATION_BASE_URL` or `--base-url` to target a hosted deployment
+
+## Screenshot Persistence Smoke Check
+
+Use the same validation script for the narrow post-deploy screenshot persistence check.
+
+Prepare before the backend restart or redeploy:
+
+```powershell
+python scripts/validate_phase1_hosted.py persistence-prepare --base-url https://your-backend-domain
+```
+
+This creates a disposable user, a disposable open session, uploads a known screenshot, and writes local check state to `tmp/phase1_screenshot_persistence.json`.
+
+After the Railway restart or redeploy completes, verify that the same screenshot still resolves:
+
+```powershell
+python scripts/validate_phase1_hosted.py persistence-verify --base-url https://your-backend-domain
+```
+
+What `persistence-verify` checks:
+- backend health is back
+- the disposable user can still log in
+- the same session and screenshot metadata still exist
+- the screenshot URL still returns the original image bytes after the redeploy
+
+By default, `persistence-verify` also uploads a disposable post-session screenshot, closes the disposable session, and removes the local state file. Use `--skip-cleanup` only if you need to inspect the disposable session manually before cleaning it up.

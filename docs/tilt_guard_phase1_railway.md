@@ -117,6 +117,22 @@ Optional API-level validation:
   - `python scripts/validate_phase1_hosted.py --base-url https://<backend-domain>`
 - this validates the hosted-critical Phase 1 API paths directly without browser automation
 
+Post-redeploy screenshot persistence smoke check:
+
+1. Before the backend restart or redeploy, prepare the check:
+   - `python scripts/validate_phase1_hosted.py persistence-prepare --base-url https://<backend-domain>`
+2. Redeploy or restart the backend service.
+3. After Railway reports the backend healthy again, verify persistence:
+   - `python scripts/validate_phase1_hosted.py persistence-verify --base-url https://<backend-domain>`
+
+This narrow smoke check proves that:
+- the backend is reachable again after the rollout
+- the same disposable user can still log in
+- the previously uploaded screenshot still exists in session metadata
+- the screenshot URL still serves the original file bytes after the restart or redeploy
+
+By default, the verify step also closes the disposable session and removes the local state file.
+
 For future Railway schema updates after the one-time baseline adoption:
 
 - run:
