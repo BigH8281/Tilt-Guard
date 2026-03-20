@@ -1,0 +1,117 @@
+# Tilt-Guard First Railway Deploy
+
+This runbook is for the first real Railway deployment trial of the current Phase 1 journal MVP.
+
+Use split-origin deployment for the first trial:
+- one Railway backend service from repo root
+- one Railway frontend static site from `frontend/`
+- one Railway Postgres service
+- one Railway volume attached to the backend service
+
+## Backend Service Settings
+
+- Source: this repository
+- Root directory: `/`
+- Install command:
+  - `pip install -r requirements.txt`
+- Start command:
+  - `python run_api.py`
+- Health check path:
+  - `/health`
+
+Recommended Railway volume setup:
+- attach one volume to the backend service
+- mount path:
+  - `/data/uploads`
+
+With that mount path:
+- the backend can use Railway's `RAILWAY_VOLUME_MOUNT_PATH` automatically
+- you may still set `FILE_STORAGE_ROOT=/data/uploads` explicitly if you prefer clarity
+
+## Frontend Service Settings
+
+- Source: this repository
+- Root directory:
+  - `frontend`
+- Install command:
+  - `npm ci`
+- Build command:
+  - `npm run build`
+- Publish directory:
+  - `dist`
+
+## Required Railway Environment Variables
+
+### Backend
+
+- `JWT_SECRET_KEY`
+  - required
+  - set a real secret
+
+- `DATABASE_URL`
+  - required
+  - use the Railway Postgres connection URL
+
+- `CORS_ALLOWED_ORIGINS`
+  - required
+  - set to the Railway frontend public URL
+
+### Backend Optional
+
+- `FILE_STORAGE_ROOT`
+  - optional if the backend volume is mounted at `/data/uploads` and Railway provides `RAILWAY_VOLUME_MOUNT_PATH`
+  - recommended explicit value if you want to avoid ambiguity:
+    - `/data/uploads`
+
+- `FILE_STORAGE_URL_PATH`
+  - optional
+  - default:
+    - `/uploads`
+
+- `APP_HOST`
+  - optional
+
+- `APP_PORT`
+  - optional
+
+- `UVICORN_RELOAD`
+  - local-dev only
+  - leave unset on Railway
+
+### Frontend
+
+- `VITE_API_BASE_URL`
+  - required for this first split-origin Railway trial
+  - set to the Railway backend public URL
+
+## Railway Trial Sequence
+
+1. Create Railway Postgres.
+2. Create the backend service from repo root.
+3. Attach a Railway volume to the backend service at `/data/uploads`.
+4. Set backend env vars:
+   - `JWT_SECRET_KEY`
+   - `DATABASE_URL`
+   - `CORS_ALLOWED_ORIGINS`
+   - optionally `FILE_STORAGE_ROOT=/data/uploads`
+5. Deploy the backend.
+6. Confirm backend `GET /health` succeeds.
+7. Create the frontend static service from `frontend/`.
+8. Set frontend env var:
+   - `VITE_API_BASE_URL=https://<backend-domain>`
+9. Deploy the frontend.
+10. Confirm frontend registration, login, session creation, screenshot upload, and session closeout all work.
+
+## Most Important Railway Checks
+
+- The backend is listening successfully on the Railway-assigned `PORT`.
+- The frontend URL is included in `CORS_ALLOWED_ORIGINS`.
+- The backend volume is mounted at `/data/uploads`.
+- Screenshots still load after a backend redeploy.
+
+## Current Known Risk
+
+The most likely first Railway failure is misconfigured screenshot persistence:
+- no volume attached
+- wrong mount path
+- or `FILE_STORAGE_ROOT` pointing somewhere other than the mounted path

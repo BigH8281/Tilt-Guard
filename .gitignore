@@ -1,0 +1,33 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+.venv/
+venv/
+
+# Env files
+.env
+.env.*
+
+# Keep example env files
+!.env.example
+!frontend/.env.example
+
+# Database
+*.db
+*.sqlite
+*.sqlite3
+
+# Uploads / local storage
+uploads/
+
+# Frontend
+frontend/node_modules/
+frontend/dist/
+
+# OS/editor junk
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
