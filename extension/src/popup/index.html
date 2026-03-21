@@ -1,0 +1,143 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Tilt Guard Telemetry</title>
+    <style>
+      :root {
+        color-scheme: dark;
+        --bg: #101418;
+        --panel: #192028;
+        --panel-2: #222c36;
+        --text: #e6edf3;
+        --muted: #92a2b2;
+        --accent: #68d391;
+        --warn: #f6ad55;
+      }
+
+      body {
+        margin: 0;
+        min-width: 340px;
+        font: 13px/1.4 "Segoe UI", sans-serif;
+        background: linear-gradient(180deg, var(--bg), #0c1014);
+        color: var(--text);
+      }
+
+      main {
+        padding: 14px;
+        display: grid;
+        gap: 12px;
+      }
+
+      section {
+        background: var(--panel);
+        border: 1px solid #2d3748;
+        border-radius: 10px;
+        padding: 12px;
+      }
+
+      h1, h2 {
+        margin: 0 0 8px;
+        font-size: 14px;
+      }
+
+      h1 {
+        font-size: 16px;
+      }
+
+      label {
+        display: grid;
+        gap: 4px;
+        margin-bottom: 8px;
+      }
+
+      input, textarea, button {
+        font: inherit;
+      }
+
+      input, textarea {
+        width: 100%;
+        box-sizing: border-box;
+        border-radius: 8px;
+        border: 1px solid #364152;
+        background: var(--panel-2);
+        color: var(--text);
+        padding: 8px;
+      }
+
+      textarea {
+        min-height: 68px;
+        resize: vertical;
+      }
+
+      button {
+        border: 0;
+        border-radius: 8px;
+        padding: 8px 10px;
+        background: var(--accent);
+        color: #08120d;
+        font-weight: 600;
+        cursor: pointer;
+      }
+
+      .secondary {
+        background: #2d3748;
+        color: var(--text);
+      }
+
+      .row {
+        display: flex;
+        gap: 8px;
+      }
+
+      .muted {
+        color: var(--muted);
+      }
+
+      .mono {
+        font-family: "SFMono-Regular", Consolas, monospace;
+        word-break: break-word;
+      }
+
+      .warning {
+        color: var(--warn);
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <section>
+        <h1>Tilt Guard Telemetry</h1>
+        <div id="summary" class="muted">Loading status...</div>
+      </section>
+
+      <section>
+        <h2>API Settings</h2>
+        <label>
+          API Base URL
+          <input id="apiBaseUrl" type="text" />
+        </label>
+        <label>
+          Auth Token
+          <textarea id="authToken"></textarea>
+        </label>
+        <div class="row">
+          <button id="saveButton">Save</button>
+          <button id="flushButton" class="secondary">Flush Now</button>
+        </div>
+      </section>
+
+      <section>
+        <h2>Latest Observation</h2>
+        <div id="statusBody" class="mono muted">No status yet.</div>
+      </section>
+
+      <section>
+        <h2>Queue</h2>
+        <div id="queueBody" class="mono muted">Queue unknown.</div>
+      </section>
+    </main>
+    <script type="module" src="./index.js"></script>
+  </body>
+  </html>

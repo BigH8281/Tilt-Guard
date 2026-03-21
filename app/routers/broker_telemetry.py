@@ -1,0 +1,43 @@
+from typing import Annotated
+
+from fastapi import APIRouter, Depends, Query, status
+from sqlalchemy.orm import Session
+
+from app.db import get_db
+from app.dependencies import get_current_user
+from app.models.user import User
+from app.schemas.broker_telemetry import (
+    BrokerTelemetryBatchIngestRequest,
+    BrokerTelemetryBatchIngestResponse,
+    BrokerTelemetryEventListResponse,
+)
+from app.services.broker_telemetry import ingest_broker_telemetry_events, list_broker_telemetry_events
+
+
+router = APIRouter(prefix="/broker-telemetry", tags=["broker-telemetry"])
+
+
+@router.get("/events", response_model=BrokerTelemetryEventListResponse)
+def get_broker_telemetry_events(
+    current_user: Annotated[User, Depends(get_current_user)],
+    db: Annotated[Session, Depends(get_db)],
+    limit: int = Query(default=20, ge=1, le=100),
+    event_type: str | None = Query(default=None),
+    broker_adapter: str | None = Query(default=None),
+) -> BrokerTelemetryEventListResponse:
+    return list_broker_telemetry_events(
+        db=db,
+        user=current_user,
+        limit=limit,
+        event_type=event_type,
+        broker_adapter=broker_adapter,
+    )
+
+
+@router.post("/ingest", response_model=BrokerTelemetryBatchIngestResponse, status_code=status.HTTP_202_ACCEPTED)
+def ingest_broker_telemetry(
+    payload: BrokerTelemetryBatchIngestRequest,
+    current_user: Annotated[User, Depends(get_current_user)],
+    db: Annotated[Session, Depends(get_db)],
+) -> BrokerTelemetryBatchIngestResponse:
+    return ingest_broker_telemetry_events(db=db, user=current_user, payload=payload)

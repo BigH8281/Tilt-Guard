@@ -1,0 +1,33 @@
+{
+  "manifest_version": 3,
+  "name": "Tilt Guard Telemetry",
+  "version": "0.1.0",
+  "description": "TradingView broker telemetry skeleton for connection and trading surface observation.",
+  "permissions": ["storage", "alarms", "tabs"],
+  "host_permissions": [
+    "https://www.tradingview.com/*",
+    "http://localhost:8000/*",
+    "http://127.0.0.1:8000/*"
+  ],
+  "background": {
+    "service_worker": "src/background/service-worker.js",
+    "type": "module"
+  },
+  "action": {
+    "default_popup": "src/popup/index.html",
+    "default_title": "Tilt Guard Telemetry"
+  },
+  "content_scripts": [
+    {
+      "matches": ["https://www.tradingview.com/chart/*"],
+      "js": [
+        "src/content/runtime.js",
+        "src/shared/brokerSignature.js",
+        "src/content/domState.js",
+        "src/content/observer.js",
+        "src/content/index.js"
+      ],
+      "run_at": "document_idle"
+    }
+  ]
+}
