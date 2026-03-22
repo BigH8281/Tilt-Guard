@@ -184,6 +184,12 @@ python -m alembic stamp 20260320_0001
 python -m alembic upgrade head
 ```
 
+- for the `phase2-telemetry` rollout, this upgrade must apply migration `20260321_0002` before or alongside the backend deploy
+- safest hosted rollout order for this release:
+  - `python -m alembic upgrade head`
+  - backend deploy
+  - frontend deploy
+
 ## Hosted API Validation
 
 Run the minimal Phase 1 API validation script against either a local backend or a hosted deployment:

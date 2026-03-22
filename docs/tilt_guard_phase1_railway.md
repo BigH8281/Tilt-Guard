@@ -138,6 +138,11 @@ For future Railway schema updates after the one-time baseline adoption:
 - run:
   - `python -m alembic upgrade head`
 - do this before or alongside the backend rollout for the new release
+- for the `phase2-telemetry` rollout, this must apply migration `20260321_0002`
+- safest rollout order for this release:
+  - `python -m alembic upgrade head`
+  - backend deploy
+  - frontend deploy
 
 ## Most Important Railway Checks
 
