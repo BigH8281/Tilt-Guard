@@ -9,15 +9,24 @@
 
   const observer = createTradingViewObserver({
     onEvents(events, snapshot) {
-      chrome.runtime.sendMessage({
-        type: "telemetry:observed",
-        payload: {
-          events,
-          snapshot,
-          pageUrl: window.location.href,
-          pageTitle: document.title,
-        },
-      });
+      void (async () => {
+        try {
+          await chrome.runtime.sendMessage({
+            type: "telemetry:observed",
+            payload: {
+              events,
+              snapshot,
+              pageUrl: window.location.href,
+              pageTitle: document.title,
+            },
+          });
+        } catch (error) {
+          logger.warn("telemetry_send_failed", {
+            error: error instanceof Error ? error.message : String(error),
+            eventCount: events.length,
+          });
+        }
+      })();
     },
   });
 

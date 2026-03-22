@@ -3,9 +3,11 @@ import { Link, useNavigate } from "react-router-dom";
 
 import { Button } from "../components/Button";
 import { EmptyState } from "../components/EmptyState";
+import { LiveTradingStatus } from "../components/LiveTradingStatus";
 import { LoadingView } from "../components/LoadingView";
 import { NewSessionModal } from "../components/NewSessionModal";
 import { useAuth } from "../context/AuthContext";
+import { useLatestBrokerTelemetry } from "../lib/brokerTelemetry";
 import {
   createSession,
   fetchOpenSession,
@@ -36,6 +38,7 @@ function displaySessionField(value) {
 export function DashboardPage() {
   const navigate = useNavigate();
   const { token } = useAuth();
+  const liveTelemetry = useLatestBrokerTelemetry(token);
   const [openSession, setOpenSession] = useState(null);
   const [openSessionPosition, setOpenSessionPosition] = useState(0);
   const [openSessionTradeCount, setOpenSessionTradeCount] = useState(0);
@@ -155,6 +158,15 @@ export function DashboardPage() {
         </section>
       ) : null}
 
+      <LiveTradingStatus
+        error={liveTelemetry.error}
+        isLoading={liveTelemetry.isLoading}
+        isRefreshing={liveTelemetry.isRefreshing}
+        onRefresh={liveTelemetry.refresh}
+        telemetry={liveTelemetry.telemetry}
+        title="Live Trading Status"
+      />
+
       {error ? <div className="alert error-alert">{error}</div> : null}
 
       <section className="table-shell glass-panel">
@@ -236,6 +248,7 @@ export function DashboardPage() {
             }
           }}
           onSubmit={handleCreateSession}
+          suggestedSymbol={liveTelemetry.telemetry?.symbol}
         />
       ) : null}
     </div>

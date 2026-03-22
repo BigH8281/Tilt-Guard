@@ -3,7 +3,13 @@ export const STORAGE_KEYS = {
   authToken: "authToken",
   telemetryQueue: "telemetryQueue",
   lastKnownStatus: "lastKnownStatus",
-  lastFlushAt: "lastFlushAt",
+  lastAttemptAt: "lastAttemptAt",
+  lastSuccessAt: "lastSuccessAt",
+  lastAttemptUrl: "lastAttemptUrl",
+  lastFlushOutcome: "lastFlushOutcome",
+  lastFlushStatusCode: "lastFlushStatusCode",
+  lastFlushTrigger: "lastFlushTrigger",
+  lastFlushBatchSize: "lastFlushBatchSize",
   lastError: "lastError",
 };
 

@@ -22,6 +22,9 @@
     // TradingView remounts and relabels these controls as the panel expands/collapses.
     accountManagerButton: buildButtonSelector(ACCOUNT_MANAGER_LABELS),
     accountManagerRegion: '[aria-label="Account manager"]',
+    brokerSelectorButton: 'button[data-qa-id="broker-selector"], button[aria-label="Select broker dropdown"]',
+    // Prefer the visible chart header symbol over page-title heuristics.
+    chartHeaderSymbolButton: '[aria-label^="Chart #"] button[aria-label="Change symbol"]',
     // The live FXCM page exposes order-entry via `title` in some layouts and `aria-label` in others.
     orderEntryButton: buildButtonSelector(ORDER_ENTRY_LABELS),
     panelOpenButton: buildButtonSelector(PANEL_TOGGLE_LABELS),
@@ -36,6 +39,7 @@
 
   const OBSERVER_CONFIG = {
     debounceMs: 750,
+    heartbeatMs: 2000,
     observationGapMs: 10000,
     footerSearchDepth: 5,
   };

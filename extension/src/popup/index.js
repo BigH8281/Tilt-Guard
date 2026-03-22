@@ -6,6 +6,39 @@ const summary = document.querySelector("#summary");
 const statusBody = document.querySelector("#statusBody");
 const queueBody = document.querySelector("#queueBody");
 
+function formatFlushSummary(payload) {
+  const snapshot = payload.status.snapshot;
+  const broker = snapshot.broker || {};
+
+  if (payload.lastFlushOutcome === "failed") {
+    return broker.broker_connected
+      ? `Observing ${broker.broker_label || "broker"} locally, but backend flush failed`
+      : "Observing TradingView locally, but backend flush failed";
+  }
+
+  if (payload.lastFlushOutcome === "attempted") {
+    return broker.broker_connected
+      ? `Observing ${broker.broker_label || "broker"} locally, flush in progress`
+      : "Observing TradingView locally, flush in progress";
+  }
+
+  if (payload.lastSuccessAt) {
+    return broker.broker_connected
+      ? `Observed locally and synced: ${broker.broker_label || "Unknown broker"}`
+      : "TradingView observed locally and synced, broker not confirmed connected";
+  }
+
+  if (payload.queueDepth > 0) {
+    return broker.broker_connected
+      ? `Observing ${broker.broker_label || "broker"} locally only, waiting to sync`
+      : "Observing TradingView locally only, waiting to sync";
+  }
+
+  return broker.broker_connected
+    ? `Connected locally only: ${broker.broker_label || "Unknown broker"}`
+    : "TradingView observed locally only, broker not confirmed connected";
+}
+
 function renderStatus(payload) {
   if (!payload?.status) {
     summary.textContent = "No TradingView telemetry observed yet.";
@@ -14,15 +47,22 @@ function renderStatus(payload) {
   }
 
   const snapshot = payload.status.snapshot;
-  summary.textContent = snapshot.broker_connected
-    ? `Connected: ${snapshot.broker_label || "Unknown broker"}`
-    : "TradingView observed, broker not confirmed connected";
+  summary.textContent = formatFlushSummary(payload);
 
   statusBody.textContent = JSON.stringify(
     {
       pageTitle: payload.status.pageTitle,
       pageUrl: payload.status.pageUrl,
       updatedAt: payload.status.updatedAt,
+      configuredApiBaseUrl: payload.settings.apiBaseUrl || null,
+      lastAttemptUrl: payload.lastAttemptUrl,
+      lastFlushOutcome: payload.lastFlushOutcome || "never_attempted",
+      lastAttemptAt: payload.lastAttemptAt,
+      lastSuccessAt: payload.lastSuccessAt,
+      lastFlushStatusCode: payload.lastFlushStatusCode,
+      lastFlushTrigger: payload.lastFlushTrigger,
+      lastFlushBatchSize: payload.lastFlushBatchSize,
+      lastError: payload.lastError || null,
       snapshot,
     },
     null,
@@ -32,8 +72,15 @@ function renderStatus(payload) {
 
 function renderQueue(payload) {
   const lines = [
+    `configuredApiBaseUrl: ${payload.settings.apiBaseUrl || "unset"}`,
+    `lastAttemptUrl: ${payload.lastAttemptUrl || "never"}`,
     `queueDepth: ${payload.queueDepth}`,
-    `lastFlushAt: ${payload.lastFlushAt || "never"}`,
+    `lastFlushOutcome: ${payload.lastFlushOutcome || "never_attempted"}`,
+    `lastAttemptAt: ${payload.lastAttemptAt || "never"}`,
+    `lastSuccessAt: ${payload.lastSuccessAt || "never"}`,
+    `lastFlushStatusCode: ${payload.lastFlushStatusCode ?? "none"}`,
+    `lastFlushTrigger: ${payload.lastFlushTrigger || "none"}`,
+    `lastFlushBatchSize: ${payload.lastFlushBatchSize ?? 0}`,
     `lastError: ${payload.lastError || "none"}`,
   ];
   queueBody.textContent = lines.join("\n");

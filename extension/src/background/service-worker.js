@@ -25,46 +25,92 @@ async function setLastStatus(status) {
   await setStorage({ [STORAGE_KEYS.lastKnownStatus]: status });
 }
 
-async function setLastError(message) {
-  await setStorage({ [STORAGE_KEYS.lastError]: message });
+function buildIngestUrl(apiBaseUrl) {
+  return `${apiBaseUrl.replace(/\/$/, "")}/broker-telemetry/ingest`;
 }
 
-async function flushQueue() {
+async function setFlushState(partialState) {
+  await setStorage(partialState);
+}
+
+async function flushQueue(trigger = "unknown") {
   const queue = await getQueue();
   if (!queue.length) {
-    return { sent: 0, skipped: true };
+    return { sent: 0, skipped: true, reason: "empty_queue" };
   }
 
   const { apiBaseUrl, authToken } = await getSettings();
+  const ingestUrl = apiBaseUrl ? buildIngestUrl(apiBaseUrl) : null;
+  const batch = queue.slice(0, OBSERVER_CONFIG.maxBatchSize);
+
   if (!apiBaseUrl || !authToken) {
     const reason = "missing_api_config";
     logger.warn("flush_skipped", { reason, queued: queue.length });
-    await setLastError(reason);
-    return { sent: 0, skipped: true };
+    await setFlushState({
+      [STORAGE_KEYS.lastAttemptAt]: new Date().toISOString(),
+      [STORAGE_KEYS.lastAttemptUrl]: ingestUrl,
+      [STORAGE_KEYS.lastFlushOutcome]: "failed",
+      [STORAGE_KEYS.lastFlushStatusCode]: null,
+      [STORAGE_KEYS.lastFlushTrigger]: trigger,
+      [STORAGE_KEYS.lastFlushBatchSize]: batch.length,
+      [STORAGE_KEYS.lastError]: reason,
+    });
+    return { sent: 0, skipped: true, reason };
   }
 
-  const batch = queue.slice(0, OBSERVER_CONFIG.maxBatchSize);
-  const response = await fetch(`${apiBaseUrl.replace(/\/$/, "")}/broker-telemetry/ingest`, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      Authorization: `Bearer ${authToken}`,
-    },
-    body: JSON.stringify({ events: batch }),
+  const attemptedAt = new Date().toISOString();
+  await setFlushState({
+    [STORAGE_KEYS.lastAttemptAt]: attemptedAt,
+    [STORAGE_KEYS.lastAttemptUrl]: ingestUrl,
+    [STORAGE_KEYS.lastFlushOutcome]: "attempted",
+    [STORAGE_KEYS.lastFlushStatusCode]: null,
+    [STORAGE_KEYS.lastFlushTrigger]: trigger,
+    [STORAGE_KEYS.lastFlushBatchSize]: batch.length,
+    [STORAGE_KEYS.lastError]: "",
   });
+
+  let response;
+  try {
+    response = await fetch(ingestUrl, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${authToken}`,
+      },
+      body: JSON.stringify({ events: batch }),
+    });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    await setFlushState({
+      [STORAGE_KEYS.lastFlushOutcome]: "failed",
+      [STORAGE_KEYS.lastFlushStatusCode]: null,
+      [STORAGE_KEYS.lastError]: `network_error:${message}`,
+    });
+    throw new Error(`Broker telemetry ingest network failure: ${message}`);
+  }
 
   if (!response.ok) {
     const errorText = await response.text();
-    await setLastError(`http_${response.status}:${errorText}`);
+    const errorMessage = `http_${response.status}:${errorText || "empty_response"}`;
+    await setFlushState({
+      [STORAGE_KEYS.lastFlushOutcome]: "failed",
+      [STORAGE_KEYS.lastFlushStatusCode]: response.status,
+      [STORAGE_KEYS.lastError]: errorMessage,
+    });
     throw new Error(`Broker telemetry ingest failed: ${response.status}`);
   }
 
   const result = await response.json();
+  const succeededAt = new Date().toISOString();
   await setQueue(queue.slice(batch.length));
-  await setStorage({ [STORAGE_KEYS.lastFlushAt]: new Date().toISOString() });
-  await setLastError("");
-  logger.info("flush_complete", { accepted: result.accepted, batchSize: batch.length });
-  return { sent: batch.length, skipped: false };
+  await setFlushState({
+    [STORAGE_KEYS.lastSuccessAt]: succeededAt,
+    [STORAGE_KEYS.lastFlushOutcome]: "succeeded",
+    [STORAGE_KEYS.lastFlushStatusCode]: response.status,
+    [STORAGE_KEYS.lastError]: "",
+  });
+  logger.info("flush_complete", { accepted: result.accepted, batchSize: batch.length, trigger });
+  return { sent: batch.length, skipped: false, accepted: result.accepted, status: response.status };
 }
 
 async function ensureAlarm() {
@@ -100,7 +146,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         tabId: sender.tab?.id || null,
       });
       try {
-        await flushQueue();
+        await flushQueue("enqueue");
       } catch (error) {
         logger.warn("flush_failed_after_enqueue", { error: String(error) });
       }
@@ -114,14 +160,30 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       const [queue, settings, state] = await Promise.all([
         getQueue(),
         getSettings(),
-        getStorage([STORAGE_KEYS.lastKnownStatus, STORAGE_KEYS.lastFlushAt, STORAGE_KEYS.lastError]),
+        getStorage([
+          STORAGE_KEYS.lastKnownStatus,
+          STORAGE_KEYS.lastAttemptAt,
+          STORAGE_KEYS.lastSuccessAt,
+          STORAGE_KEYS.lastAttemptUrl,
+          STORAGE_KEYS.lastFlushOutcome,
+          STORAGE_KEYS.lastFlushStatusCode,
+          STORAGE_KEYS.lastFlushTrigger,
+          STORAGE_KEYS.lastFlushBatchSize,
+          STORAGE_KEYS.lastError,
+        ]),
       ]);
       sendResponse({
         ok: true,
         status: state[STORAGE_KEYS.lastKnownStatus] || null,
         queueDepth: queue.length,
         settings,
-        lastFlushAt: state[STORAGE_KEYS.lastFlushAt] || null,
+        lastAttemptAt: state[STORAGE_KEYS.lastAttemptAt] || null,
+        lastSuccessAt: state[STORAGE_KEYS.lastSuccessAt] || null,
+        lastAttemptUrl: state[STORAGE_KEYS.lastAttemptUrl] || null,
+        lastFlushOutcome: state[STORAGE_KEYS.lastFlushOutcome] || null,
+        lastFlushStatusCode: state[STORAGE_KEYS.lastFlushStatusCode] || null,
+        lastFlushTrigger: state[STORAGE_KEYS.lastFlushTrigger] || null,
+        lastFlushBatchSize: state[STORAGE_KEYS.lastFlushBatchSize] || null,
         lastError: state[STORAGE_KEYS.lastError] || null,
       });
     })();
@@ -135,7 +197,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         [STORAGE_KEYS.authToken]: message.payload.authToken,
       });
       try {
-        await flushQueue();
+        await flushQueue("settings_update");
       } catch (error) {
         logger.warn("flush_failed_after_settings_update", { error: String(error) });
       }
@@ -147,7 +209,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   if (message?.type === "telemetry:flush-now") {
     void (async () => {
       try {
-        const result = await flushQueue();
+        const result = await flushQueue("manual");
         sendResponse({ ok: true, result });
       } catch (error) {
         sendResponse({ ok: false, error: String(error) });
@@ -164,7 +226,7 @@ chrome.alarms.onAlarm.addListener((alarm) => {
     return;
   }
 
-  void flushQueue().catch((error) => {
+  void flushQueue("alarm").catch((error) => {
     logger.warn("scheduled_flush_failed", { error: String(error) });
   });
 });

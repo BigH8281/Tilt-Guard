@@ -10,8 +10,13 @@ from app.schemas.broker_telemetry import (
     BrokerTelemetryBatchIngestRequest,
     BrokerTelemetryBatchIngestResponse,
     BrokerTelemetryEventListResponse,
+    BrokerTelemetryLatestResponse,
 )
-from app.services.broker_telemetry import ingest_broker_telemetry_events, list_broker_telemetry_events
+from app.services.broker_telemetry import (
+    get_latest_broker_telemetry,
+    ingest_broker_telemetry_events,
+    list_broker_telemetry_events,
+)
 
 
 router = APIRouter(prefix="/broker-telemetry", tags=["broker-telemetry"])
@@ -30,6 +35,19 @@ def get_broker_telemetry_events(
         user=current_user,
         limit=limit,
         event_type=event_type,
+        broker_adapter=broker_adapter,
+    )
+
+
+@router.get("/latest", response_model=BrokerTelemetryLatestResponse)
+def get_latest_broker_telemetry_event(
+    current_user: Annotated[User, Depends(get_current_user)],
+    db: Annotated[Session, Depends(get_db)],
+    broker_adapter: str | None = Query(default=None),
+) -> BrokerTelemetryLatestResponse:
+    return get_latest_broker_telemetry(
+        db=db,
+        user=current_user,
         broker_adapter=broker_adapter,
     )
 

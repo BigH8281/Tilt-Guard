@@ -4,6 +4,8 @@
 $projectRoot = Split-Path -Parent $MyInvocation.MyCommand.Path
 $frontendRoot = Join-Path $projectRoot "frontend"
 $frontendUrl = "http://localhost:5173"
+$frontendNodeModules = Join-Path $frontendRoot "node_modules"
+$envFile = Join-Path $projectRoot ".env"
 
 # Prefer a local virtual environment when one exists.
 $activateScript = $null
@@ -19,11 +21,39 @@ foreach ($candidate in $activateCandidates) {
     }
 }
 
+if (Test-Path $envFile) {
+    Get-Content $envFile | ForEach-Object {
+        $line = $_.Trim()
+        if (-not $line -or $line.StartsWith("#")) {
+            return
+        }
+
+        $separatorIndex = $line.IndexOf("=")
+        if ($separatorIndex -lt 1) {
+            return
+        }
+
+        $name = $line.Substring(0, $separatorIndex).Trim()
+        $value = $line.Substring($separatorIndex + 1).Trim()
+        if ($name) {
+            [System.Environment]::SetEnvironmentVariable($name, $value, "Process")
+        }
+    }
+}
+
+$pythonCommand = if (Get-Command py.exe -ErrorAction SilentlyContinue) {
+    "py -3"
+} elseif (Get-Command python.exe -ErrorAction SilentlyContinue) {
+    "python"
+} else {
+    throw "Python was not found. Install Python or activate a project virtual environment first."
+}
+
 # Use an existing dev secret when already set, otherwise generate a per-run dev secret.
 $jwtSecret = if ($env:JWT_SECRET_KEY) {
     $env:JWT_SECRET_KEY
 } else {
-    [guid]::NewGuid().ToString("N")
+    "tilt-guard-local-dev-secret"
 }
 
 $backendCommands = @(
@@ -36,12 +66,19 @@ if ($activateScript) {
 
 $backendCommands += @(
     "`$env:JWT_SECRET_KEY = '$jwtSecret'",
-    "python -m alembic upgrade head",
-    "python -m uvicorn app.main:app --reload"
+    "$pythonCommand -m alembic upgrade head",
+    "$pythonCommand -m uvicorn app.main:app --reload"
 )
 
 $frontendCommands = @(
-    "Set-Location '$frontendRoot'",
+    "Set-Location '$frontendRoot'"
+)
+
+if (-not (Test-Path $frontendNodeModules)) {
+    $frontendCommands += "npm.cmd install"
+}
+
+$frontendCommands += @(
     "npm.cmd run dev"
 )
 

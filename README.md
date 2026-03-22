@@ -25,6 +25,38 @@ What it does:
 - waits briefly, then opens the app automatically in your default browser
 - opens `http://localhost:5173`
 
+Recommended on Windows:
+- use [start_all.ps1](/home/higgo/code/Tilt-Guard/start_all.ps1)
+- use [start_all.bat](/home/higgo/code/Tilt-Guard/start_all.bat) only as a convenience wrapper that launches the PowerShell script
+
+Notes:
+- the PowerShell helper now prefers `py -3`, falls back to `python`, and installs frontend dependencies first when `frontend/node_modules` is missing
+- it loads backend env from the repo `.env` first, including `JWT_SECRET_KEY`, before falling back to a fixed local dev secret
+- it still opens the app automatically in your default browser at `http://localhost:5173`
+
+## Launch The App On WSL Or Linux
+
+From the project root:
+
+```bash
+./start_all.sh
+```
+
+What it does:
+- activates `.venv` or `venv` if present
+- generates a local `JWT_SECRET_KEY` for the run if one is not already set
+- runs `python -m alembic upgrade head`
+- starts the backend with `python -m uvicorn app.main:app --reload`
+- installs frontend dependencies first when `frontend/node_modules` is missing
+- starts the frontend with `npm run dev -- --host 127.0.0.1`
+- attempts to open the browser automatically at `http://127.0.0.1:5173`
+
+Notes:
+- on WSL/Linux, browser auto-open depends on an available opener such as `xdg-open`, `wslview`, or `open`
+- the shell helper loads backend env from the repo `.env` first, including `JWT_SECRET_KEY`, before falling back to a fixed local dev secret
+- if no supported opener is available, the script leaves both services running and prints the URLs instead
+- stop both services with `Ctrl+C` in the same terminal
+
 Manual start remains available:
 
 ```powershell
