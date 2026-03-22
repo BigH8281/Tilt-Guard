@@ -5,9 +5,11 @@ import { Button } from "../components/Button";
 import { EmptyState } from "../components/EmptyState";
 import { EndSessionPanel } from "../components/EndSessionPanel";
 import { JournalConsole } from "../components/JournalConsole";
+import { LiveTradingStatus } from "../components/LiveTradingStatus";
 import { LoadingView } from "../components/LoadingView";
 import { ScreenshotGallery } from "../components/ScreenshotGallery";
 import { useAuth } from "../context/AuthContext";
+import { useLatestBrokerTelemetry } from "../lib/brokerTelemetry";
 import {
   closeTrade,
   createJournalEntry,
@@ -192,6 +194,7 @@ export function JournalPage() {
   const logRef = useRef(null);
   const { sessionId } = useParams();
   const { token } = useAuth();
+  const liveTelemetry = useLatestBrokerTelemetry(token);
   const [session, setSession] = useState(null);
   const [journalEntries, setJournalEntries] = useState([]);
   const [tradeEvents, setTradeEvents] = useState([]);
@@ -587,6 +590,16 @@ export function JournalPage() {
         hidden
         onChange={handleManualScreenshot}
         type="file"
+      />
+
+      <LiveTradingStatus
+        error={liveTelemetry.error}
+        isLoading={liveTelemetry.isLoading}
+        isRefreshing={liveTelemetry.isRefreshing}
+        onRefresh={liveTelemetry.refresh}
+        telemetry={liveTelemetry.telemetry}
+        title="Live Context"
+        variant="strip"
       />
 
       <section className="journal-top-strip glass-panel">

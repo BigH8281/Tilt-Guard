@@ -201,6 +201,14 @@ export function fetchScreenshots(token, sessionId) {
   });
 }
 
+export async function fetchLatestBrokerTelemetry(token) {
+  const response = await request("/broker-telemetry/latest", {
+    headers: authHeaders(token),
+  });
+
+  return response.telemetry;
+}
+
 export function endSession(token, sessionId, payload) {
   return request(`/sessions/${sessionId}/end`, {
     method: "POST",

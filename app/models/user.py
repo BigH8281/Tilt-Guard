@@ -7,6 +7,7 @@ from sqlalchemy.orm import Mapped, mapped_column, relationship
 from app.db import Base
 
 if TYPE_CHECKING:
+    from app.models.broker_telemetry_event import BrokerTelemetryEvent
     from app.models.trading_session import TradingSession
 
 
@@ -19,6 +20,10 @@ class User(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, nullable=False)
 
     trading_sessions: Mapped[list["TradingSession"]] = relationship(
+        back_populates="user",
+        cascade="all, delete-orphan",
+    )
+    broker_telemetry_events: Mapped[list["BrokerTelemetryEvent"]] = relationship(
         back_populates="user",
         cascade="all, delete-orphan",
     )

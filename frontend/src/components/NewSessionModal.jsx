@@ -1,4 +1,4 @@
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
 import { Button } from "./Button";
 import { Field } from "./Field";
@@ -10,11 +10,24 @@ const initialState = {
   symbol: "MNQ",
 };
 
-export function NewSessionModal({ error, isSubmitting, onClose, onSubmit }) {
+export function NewSessionModal({ error, isSubmitting, onClose, onSubmit, suggestedSymbol = null }) {
   const fileInputRef = useRef(null);
-  const [form, setForm] = useState(initialState);
+  const [form, setForm] = useState({
+    ...initialState,
+    symbol: suggestedSymbol || initialState.symbol,
+  });
   const [screenshot, setScreenshot] = useState(null);
   const [captureHint, setCaptureHint] = useState("");
+  const [hasEditedSymbol, setHasEditedSymbol] = useState(false);
+
+  useEffect(() => {
+    if (suggestedSymbol && !hasEditedSymbol) {
+      setForm((current) => ({
+        ...current,
+        symbol: suggestedSymbol,
+      }));
+    }
+  }, [hasEditedSymbol, suggestedSymbol]);
 
   function updateField(name, value) {
     setForm((current) => ({
@@ -63,11 +76,19 @@ export function NewSessionModal({ error, isSubmitting, onClose, onSubmit }) {
         <Field label="Symbol">
           <input
             value={form.symbol}
-            onChange={(event) => updateField("symbol", event.target.value.toUpperCase())}
+            onChange={(event) => {
+              setHasEditedSymbol(true);
+              updateField("symbol", event.target.value.toUpperCase());
+            }}
             placeholder="MNQ"
             required
           />
         </Field>
+        {suggestedSymbol ? (
+          <div className="live-suggestion-note">
+            Suggested from the live chart: <strong>{suggestedSymbol}</strong>. You can edit or overwrite it.
+          </div>
+        ) : null}
         <Field label="Pre-session screenshot" hint="Capture is the default path. File upload is fallback.">
           <input
             ref={fileInputRef}

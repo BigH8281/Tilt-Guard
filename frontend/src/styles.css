@@ -83,7 +83,8 @@ img {
 .workspace-header h2,
 .auth-copy h1,
 .modal h2,
-.panel-head h3 {
+.panel-head h3,
+.live-status-header h3 {
   margin: 0;
   font-family: "Rockwell", "Georgia", serif;
   font-weight: 700;
@@ -204,7 +205,16 @@ img {
   margin-top: 0.9rem;
 }
 
+.live-status-card {
+  padding: 0.85rem 1rem;
+}
+
+.live-status-strip {
+  padding: 0.7rem 0.9rem;
+}
+
 .compact-header,
+.live-status-card,
 .status-strip,
 .journal-top-strip,
 .table-shell,
@@ -222,6 +232,94 @@ img {
   align-items: center;
   gap: 1rem;
   padding: 0.9rem 1rem;
+}
+
+.live-status-header,
+.live-status-summary,
+.live-status-copy,
+.live-status-grid {
+  display: flex;
+}
+
+.live-status-header,
+.live-status-summary {
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.9rem;
+}
+
+.live-status-header h3,
+.live-status-copy strong {
+  margin: 0;
+}
+
+.live-status-summary {
+  margin-top: 0.75rem;
+  align-items: flex-start;
+}
+
+.live-status-copy {
+  flex-direction: column;
+  gap: 0.18rem;
+}
+
+.live-status-dot {
+  width: 0.72rem;
+  height: 0.72rem;
+  border-radius: 999px;
+  flex: 0 0 auto;
+  margin-top: 0.15rem;
+  background: #7f8da6;
+  box-shadow: 0 0 0.75rem rgba(127, 141, 166, 0.35);
+}
+
+.live-status-dot.live {
+  background: #82f2d2;
+  box-shadow: 0 0 0.95rem rgba(130, 242, 210, 0.65);
+}
+
+.live-status-dot.attention {
+  background: #ffd386;
+  box-shadow: 0 0 0.95rem rgba(255, 211, 134, 0.55);
+}
+
+.live-status-dot.offline {
+  background: #ff97ae;
+  box-shadow: 0 0 0.95rem rgba(255, 151, 174, 0.45);
+}
+
+.live-status-dot.pulsing {
+  animation: live-status-pulse 1.6s ease-in-out infinite;
+}
+
+.live-status-grid {
+  margin: 0.85rem 0 0;
+  padding: 0;
+  flex-wrap: wrap;
+  gap: 0.75rem 1.25rem;
+}
+
+.live-status-grid div {
+  min-width: 120px;
+}
+
+.live-status-grid dt {
+  color: #8a9db8;
+  font-size: 0.75rem;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+
+.live-status-grid dd {
+  margin: 0.18rem 0 0;
+}
+
+.live-status-strip .live-status-summary {
+  margin-top: 0.55rem;
+}
+
+.live-status-strip .live-status-grid {
+  margin-top: 0.65rem;
 }
 
 .status-strip {
@@ -687,6 +785,12 @@ img {
   font-size: 0.83rem;
 }
 
+.live-suggestion-note {
+  color: #97a8c0;
+  font-size: 0.84rem;
+  margin-top: -0.2rem;
+}
+
 .modal-backdrop {
   position: fixed;
   inset: 0;
@@ -770,6 +874,19 @@ img {
   }
 }
 
+@keyframes live-status-pulse {
+  0%,
+  100% {
+    transform: scale(1);
+    opacity: 0.9;
+  }
+
+  50% {
+    transform: scale(1.15);
+    opacity: 1;
+  }
+}
+
 @media (max-width: 1180px) {
   .status-strip,
   .journal-workbench.with-side-panel {
@@ -799,6 +916,7 @@ img {
 
   .topbar,
   .workspace-header,
+  .live-status-header,
   .journal-top-strip,
   .toolbar-row,
   .topbar-actions {
