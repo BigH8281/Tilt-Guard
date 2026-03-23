@@ -9,7 +9,7 @@ import { LiveTradingStatus } from "../components/LiveTradingStatus";
 import { LoadingView } from "../components/LoadingView";
 import { ScreenshotGallery } from "../components/ScreenshotGallery";
 import { useAuth } from "../context/AuthContext";
-import { useLatestBrokerTelemetry } from "../lib/brokerTelemetry";
+import { getTelemetryStatusCopy, useLatestBrokerTelemetry } from "../lib/brokerTelemetry";
 import {
   closeTrade,
   createJournalEntry,
@@ -149,6 +149,8 @@ const GUIDED_WORKFLOWS = {
   ],
 };
 
+const JOURNAL_VIEW_MODE_STORAGE_KEY = "tilt-guard-journal-view-mode";
+
 function buildFeed(journalEntries, tradeEvents, screenshots) {
   const journalFeed = journalEntries.map((entry) => ({
     id: `journal-${entry.id}`,
@@ -187,6 +189,15 @@ function displaySessionField(value) {
   return value === "pending" ? "Setup pending" : value;
 }
 
+function getStoredJournalViewMode() {
+  if (typeof window === "undefined") {
+    return "full";
+  }
+
+  const stored = window.localStorage.getItem(JOURNAL_VIEW_MODE_STORAGE_KEY);
+  return stored === "minimized" ? "minimized" : "full";
+}
+
 function createWorkflowValidationError(message) {
   const error = new Error(message);
   error.code = "WORKFLOW_VALIDATION";
@@ -214,15 +225,45 @@ export function JournalPage() {
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [pageError, setPageError] = useState("");
   const [actionError, setActionError] = useState("");
+  const [viewMode, setViewMode] = useState(getStoredJournalViewMode);
 
   const feed = useMemo(
     () => buildFeed(journalEntries, tradeEvents, screenshots),
     [journalEntries, screenshots, tradeEvents],
   );
   const hasPostScreenshot = screenshots.some((shot) => shot.screenshot_type === "post");
+  const isMinimizedMode = viewMode === "minimized";
   const activePrompt = workflow
     ? GUIDED_WORKFLOWS[workflow.type][workflow.stepIndex]
     : null;
+  const telemetryStatus = getTelemetryStatusCopy(liveTelemetry.telemetry);
+  const ribbonBroker =
+    liveTelemetry.telemetry?.snapshot?.broker?.broker_label ||
+    liveTelemetry.telemetry?.broker_adapter?.toUpperCase() ||
+    "Unavailable";
+  const ribbonAccount = liveTelemetry.telemetry?.account_name || "Unavailable";
+  const ribbonSymbol = liveTelemetry.telemetry?.symbol || session?.symbol || "Unavailable";
+  const ribbonModeLabel = activePrompt
+    ? `${workflow.type.toUpperCase()} • ${activePrompt.label}`
+    : "LIVE NOTE";
+
+  useEffect(() => {
+    if (typeof window !== "undefined") {
+      window.localStorage.setItem(JOURNAL_VIEW_MODE_STORAGE_KEY, viewMode);
+    }
+  }, [viewMode]);
+
+  useEffect(() => {
+    if (typeof document === "undefined") {
+      return undefined;
+    }
+
+    document.body.classList.toggle("journal-shell-minimized", isMinimizedMode);
+
+    return () => {
+      document.body.classList.remove("journal-shell-minimized");
+    };
+  }, [isMinimizedMode]);
 
   function logClientEvent(level, event, details = {}) {
     const payload = {
@@ -756,7 +797,7 @@ export function JournalPage() {
   }
 
   return (
-    <div className="workspace-page">
+    <div className={`workspace-page ${isMinimizedMode ? "journal-minimized-mode" : ""}`}>
       <input
         ref={filePickerRef}
         accept="image/*"
@@ -765,88 +806,135 @@ export function JournalPage() {
         type="file"
       />
 
-      <LiveTradingStatus
-        error={liveTelemetry.error}
-        isLoading={liveTelemetry.isLoading}
-        isRefreshing={liveTelemetry.isRefreshing}
-        onRefresh={liveTelemetry.refresh}
-        telemetry={liveTelemetry.telemetry}
-        title="Live Context"
-        variant="strip"
-      />
-
-      <section className="journal-top-strip glass-panel">
-        <div className="session-line">
-          <strong>#{session.id}</strong>
-          <span>{session.symbol}</span>
-          <span>{session.session_name}</span>
-          <span>{displaySessionField(session.market_bias)}</span>
-          <span>{displaySessionField(session.htf_condition)}</span>
-          <span>{displaySessionField(session.expected_open_type)}</span>
-          <span>{session.confidence > 0 ? `${session.confidence}/10` : "Confidence pending"}</span>
-          <span>{position.current_open_size} open</span>
-          <span className={`status-pill ${session.status}`}>{session.status}</span>
-        </div>
-        <div className="toolbar-row">
-          <Link to="/">
-            <Button type="button" variant="secondary">
-              Dashboard
-            </Button>
-          </Link>
-          <Button
-            disabled={session.status !== "open" || isSubmitting}
-            onClick={() => startWorkflow("open")}
-            type="button"
-            variant="secondary"
-          >
-            Trade Open
-          </Button>
-          <Button
-            disabled={session.status !== "open" || isSubmitting || position.current_open_size <= 0}
-            onClick={startCloseWorkflow}
-            type="button"
-            variant="secondary"
-          >
-            Trade Close
-          </Button>
-          <Button
-            disabled={session.status !== "open" || isSubmitting}
-            onClick={handleCaptureScreenshot}
-            type="button"
-            variant="secondary"
-          >
-            Screenshot
-          </Button>
-          <Button
-            onClick={() => setPanelMode(panelMode === "screens" ? null : "screens")}
-            type="button"
-            variant="secondary"
-          >
-            Screens
-          </Button>
-          <Button
-            onClick={() => setPanelMode(panelMode === "details" ? null : "details")}
-            type="button"
-            variant="secondary"
-          >
-            Details
-          </Button>
-          {session.status === "open" ? (
-            <Button
-              onClick={() => setPanelMode(panelMode === "end" ? null : "end")}
+      {isMinimizedMode ? (
+        <section className="journal-minimized-ribbon">
+          <div className="journal-ribbon-strip">
+            <span className={`journal-ribbon-dot ${telemetryStatus.tone}`} />
+            <span className="journal-ribbon-pill">{telemetryStatus.label}</span>
+            <span className="journal-ribbon-meta">Broker {ribbonBroker}</span>
+            <span className="journal-ribbon-meta">Acct {ribbonAccount}</span>
+            <span className="journal-ribbon-meta">Sym {ribbonSymbol}</span>
+            <span className={`journal-ribbon-pill ${session.status}`}>{session.status}</span>
+            <span className="journal-ribbon-meta">Mode {ribbonModeLabel}</span>
+            <span className="journal-ribbon-meta">{position.current_open_size} open</span>
+          </div>
+          <div className="journal-ribbon-actions">
+            {session.status === "open" ? (
+              <button
+                className="journal-ribbon-button journal-ribbon-button-danger"
+                onClick={() => setPanelMode(panelMode === "end" ? null : "end")}
+                type="button"
+              >
+                End
+              </button>
+            ) : null}
+            <button
+              className="journal-ribbon-button"
+              onClick={() => setViewMode("full")}
               type="button"
-              variant="danger"
             >
-              End Session
-            </Button>
-          ) : null}
-        </div>
-      </section>
+              Full
+            </button>
+          </div>
+        </section>
+      ) : (
+        <>
+          <LiveTradingStatus
+            error={liveTelemetry.error}
+            isLoading={liveTelemetry.isLoading}
+            isRefreshing={liveTelemetry.isRefreshing}
+            onRefresh={liveTelemetry.refresh}
+            telemetry={liveTelemetry.telemetry}
+            title="Live Context"
+            variant="strip"
+          />
+
+          <section className="journal-top-strip glass-panel">
+            <div className="session-line">
+              <strong>#{session.id}</strong>
+              <span>{session.symbol}</span>
+              <span>{session.session_name}</span>
+              <span>{displaySessionField(session.market_bias)}</span>
+              <span>{displaySessionField(session.htf_condition)}</span>
+              <span>{displaySessionField(session.expected_open_type)}</span>
+              <span>{session.confidence > 0 ? `${session.confidence}/10` : "Confidence pending"}</span>
+              <span>{position.current_open_size} open</span>
+              <span className={`status-pill ${session.status}`}>{session.status}</span>
+            </div>
+            <div className="toolbar-row">
+              <Link to="/">
+                <Button type="button" variant="secondary">
+                  Dashboard
+                </Button>
+              </Link>
+              <Button
+                disabled={session.status !== "open" || isSubmitting}
+                onClick={() => startWorkflow("open")}
+                type="button"
+                variant="secondary"
+              >
+                Trade Open
+              </Button>
+              <Button
+                disabled={session.status !== "open" || isSubmitting || position.current_open_size <= 0}
+                onClick={startCloseWorkflow}
+                type="button"
+                variant="secondary"
+              >
+                Trade Close
+              </Button>
+              <Button
+                disabled={session.status !== "open" || isSubmitting}
+                onClick={handleCaptureScreenshot}
+                type="button"
+                variant="secondary"
+              >
+                Screenshot
+              </Button>
+              <Button
+                onClick={() => setPanelMode(panelMode === "screens" ? null : "screens")}
+                type="button"
+                variant="secondary"
+              >
+                Screens
+              </Button>
+              <Button
+                onClick={() => setPanelMode(panelMode === "details" ? null : "details")}
+                type="button"
+                variant="secondary"
+              >
+                Details
+              </Button>
+              <Button
+                className="journal-mode-toggle"
+                onClick={() => setViewMode("minimized")}
+                type="button"
+                variant="secondary"
+              >
+                Minimise
+              </Button>
+              {session.status === "open" ? (
+                <Button
+                  onClick={() => setPanelMode(panelMode === "end" ? null : "end")}
+                  type="button"
+                  variant="danger"
+                >
+                  End Session
+                </Button>
+              ) : null}
+            </div>
+          </section>
+        </>
+      )}
 
       {pageError ? <div className="alert error-alert">{pageError}</div> : null}
       {actionError ? <div className="alert error-alert">{actionError}</div> : null}
 
-      <section className={`journal-workbench ${panelMode ? "with-side-panel" : ""}`}>
+      <section
+        className={`journal-workbench ${
+          panelMode && !isMinimizedMode ? "with-side-panel" : ""
+        } ${isMinimizedMode ? "journal-minimized-workbench" : ""}`}
+      >
         <JournalConsole
           ref={commandInputRef}
           activePrompt={activePrompt}
@@ -860,7 +948,7 @@ export function JournalPage() {
           workflowTranscript={workflow?.transcript ?? []}
         />
 
-        {panelMode === "details" ? (
+        {!isMinimizedMode && panelMode === "details" ? (
           <aside className="side-panel glass-panel review-panel">
             <div className="panel-head">
               <div>
@@ -916,7 +1004,7 @@ export function JournalPage() {
           </aside>
         ) : null}
 
-        {panelMode === "screens" ? (
+        {!isMinimizedMode && panelMode === "screens" ? (
           <aside className="side-panel glass-panel review-panel">
             <div className="panel-head">
               <div>
@@ -935,7 +1023,7 @@ export function JournalPage() {
           </aside>
         ) : null}
 
-        {panelMode === "end" ? (
+        {!isMinimizedMode && panelMode === "end" ? (
           <EndSessionPanel
             error={actionError}
             hasPostScreenshot={hasPostScreenshot}
@@ -946,6 +1034,17 @@ export function JournalPage() {
           />
         ) : null}
       </section>
+
+      {isMinimizedMode && panelMode === "end" ? (
+        <EndSessionPanel
+          error={actionError}
+          hasPostScreenshot={hasPostScreenshot}
+          isSubmitting={isSubmitting}
+          onCancel={() => setPanelMode(null)}
+          onSubmit={handleEndSession}
+          sessionId={sessionId}
+        />
+      ) : null}
     </div>
   );
 }
