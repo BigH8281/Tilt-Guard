@@ -5,7 +5,9 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$SCRIPT_DIR"
 FRONTEND_ROOT="$PROJECT_ROOT/frontend"
-FRONTEND_URL="${FRONTEND_URL:-http://127.0.0.1:5173}"
+FRONTEND_PORT="${FRONTEND_PORT:-5173}"
+BACKEND_PORT="${BACKEND_PORT:-8000}"
+FRONTEND_URL="${FRONTEND_URL:-http://127.0.0.1:$FRONTEND_PORT}"
 ENV_FILE="$PROJECT_ROOT/.env"
 
 if [[ -f "$ENV_FILE" ]]; then
@@ -42,6 +44,22 @@ export JWT_SECRET_KEY="${JWT_SECRET_KEY:-tilt-guard-local-dev-secret}"
 BACKEND_PID=""
 FRONTEND_PID=""
 
+ensure_port_free() {
+  local port="$1"
+  local name="$2"
+
+  if ss -ltn "( sport = :$port )" | tail -n +2 | grep -q .; then
+    echo "$name port $port is already in use." >&2
+    if command -v lsof >/dev/null 2>&1; then
+      lsof -iTCP:"$port" -sTCP:LISTEN >&2 || true
+    else
+      ss -ltnp "( sport = :$port )" >&2 || true
+    fi
+    echo "Stop the existing process or rerun with a different port." >&2
+    exit 1
+  fi
+}
+
 cleanup() {
   if [[ -n "$BACKEND_PID" ]] && kill -0 "$BACKEND_PID" >/dev/null 2>&1; then
     kill "$BACKEND_PID" >/dev/null 2>&1 || true
@@ -53,9 +71,12 @@ cleanup() {
 
 trap cleanup EXIT INT TERM
 
+ensure_port_free "$BACKEND_PORT" "Backend"
+ensure_port_free "$FRONTEND_PORT" "Frontend"
+
 echo "Starting backend from $PROJECT_ROOT"
 "$PYTHON_BIN" -m alembic upgrade head
-"$PYTHON_BIN" -m uvicorn app.main:app --reload &
+"$PYTHON_BIN" -m uvicorn app.main:app --reload --host 127.0.0.1 --port "$BACKEND_PORT" &
 BACKEND_PID=$!
 
 if [[ ! -d "$FRONTEND_ROOT/node_modules" ]]; then
@@ -64,7 +85,7 @@ if [[ ! -d "$FRONTEND_ROOT/node_modules" ]]; then
 fi
 
 echo "Starting frontend from $FRONTEND_ROOT"
-(cd "$FRONTEND_ROOT" && npm run dev -- --host 127.0.0.1) &
+(cd "$FRONTEND_ROOT" && npm run dev -- --host 127.0.0.1 --port "$FRONTEND_PORT" --strictPort) &
 FRONTEND_PID=$!
 
 sleep 4
@@ -82,7 +103,7 @@ if [[ "${TILT_GUARD_NO_BROWSER:-0}" != "1" ]]; then
 fi
 
 echo "Tilt-Guard frontend: $FRONTEND_URL"
-echo "Tilt-Guard backend: http://127.0.0.1:8000"
+echo "Tilt-Guard backend: http://127.0.0.1:$BACKEND_PORT"
 echo "Press Ctrl+C in this terminal to stop both services."
 
 wait "$BACKEND_PID" "$FRONTEND_PID"
