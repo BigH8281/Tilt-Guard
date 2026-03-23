@@ -1,4 +1,5 @@
 from contextlib import asynccontextmanager
+import logging
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
@@ -12,6 +13,12 @@ from app.routers.broker_telemetry import router as broker_telemetry_router
 from app.routers.health import router as health_router
 from app.routers.sessions import router as sessions_router
 from app.storage import FILE_STORAGE_ROOT, ensure_storage_root
+
+
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s %(levelname)s %(name)s %(message)s",
+)
 
 
 @asynccontextmanager

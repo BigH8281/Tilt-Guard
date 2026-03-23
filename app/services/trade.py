@@ -1,9 +1,14 @@
+import logging
+
 from sqlalchemy import case, func, select
 from sqlalchemy.orm import Session
 
 from app.models.trade_event import TradeEvent
 from app.models.trading_session import TradingSession
 from app.services.session import ensure_session_is_open
+
+
+logger = logging.getLogger(__name__)
 
 
 def get_position_size(db: Session, session_id: int) -> int:
@@ -48,7 +53,26 @@ def create_close_trade(
     ensure_session_is_open(session)
 
     current_open_size = get_position_size(db, session.id)
+    logger.info(
+        "close_trade_attempt session_id=%s requested_size=%s current_open_size=%s",
+        session.id,
+        size,
+        current_open_size,
+    )
+    if current_open_size <= 0:
+        logger.warning(
+            "close_trade_rejected_no_open_position session_id=%s requested_size=%s",
+            session.id,
+            size,
+        )
+        raise ValueError("Cannot close a trade because no open position exists.")
     if size > current_open_size:
+        logger.warning(
+            "close_trade_rejected_size_exceeds_position session_id=%s requested_size=%s current_open_size=%s",
+            session.id,
+            size,
+            current_open_size,
+        )
         raise ValueError("Cannot close more than the current open size.")
 
     event = TradeEvent(
@@ -61,4 +85,10 @@ def create_close_trade(
     db.add(event)
     db.commit()
     db.refresh(event)
+    logger.info(
+        "close_trade_created session_id=%s trade_event_id=%s remaining_open_size=%s",
+        session.id,
+        event.id,
+        current_open_size - size,
+    )
     return event

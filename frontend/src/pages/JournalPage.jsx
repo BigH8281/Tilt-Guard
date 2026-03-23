@@ -187,6 +187,12 @@ function displaySessionField(value) {
   return value === "pending" ? "Setup pending" : value;
 }
 
+function createWorkflowValidationError(message) {
+  const error = new Error(message);
+  error.code = "WORKFLOW_VALIDATION";
+  return error;
+}
+
 export function JournalPage() {
   const navigate = useNavigate();
   const commandInputRef = useRef(null);
@@ -218,6 +224,22 @@ export function JournalPage() {
     ? GUIDED_WORKFLOWS[workflow.type][workflow.stepIndex]
     : null;
 
+  function logClientEvent(level, event, details = {}) {
+    const payload = {
+      event,
+      sessionId,
+      sessionStatus: session?.status ?? null,
+      currentOpenSize: position.current_open_size,
+      workflowType: workflow?.type ?? null,
+      workflowStepIndex: workflow?.stepIndex ?? null,
+      panelMode,
+      isSubmitting,
+      ...details,
+    };
+    const logger = console[level] ?? console.info;
+    logger("[JournalPage]", payload);
+  }
+
   function focusConsoleInput() {
     window.requestAnimationFrame(() => {
       if (!commandInputRef.current?.disabled) {
@@ -240,13 +262,19 @@ export function JournalPage() {
   }
 
   function cancelWorkflow() {
+    logClientEvent("info", "guided_action_cancelled");
     setWorkflow(null);
     setCommandInput("");
   }
 
-  async function loadPage() {
-    setIsLoading(true);
-    setPageError("");
+  async function syncSessionState(reason, options = {}) {
+    const { showSpinner = false } = options;
+    logClientEvent("info", "session_state_sync_started", { reason, showSpinner });
+
+    if (showSpinner) {
+      setIsLoading(true);
+      setPageError("");
+    }
 
     try {
       const [sessionResponse, journalResponse, tradeResponse, positionResponse, screenshotResponse] =
@@ -264,15 +292,41 @@ export function JournalPage() {
       setPosition(positionResponse);
       setScreenshots(screenshotResponse);
       setPanelMode(sessionResponse.status === "closed" ? "details" : null);
+
+      logClientEvent("info", "session_state_sync_completed", {
+        reason,
+        syncedSessionStatus: sessionResponse.status,
+        syncedOpenSize: positionResponse.current_open_size,
+        syncedTradeCount: tradeResponse.length,
+        syncedJournalCount: journalResponse.length,
+        syncedScreenshotCount: screenshotResponse.length,
+      });
+
+      return {
+        sessionResponse,
+        journalResponse,
+        tradeResponse,
+        positionResponse,
+        screenshotResponse,
+      };
     } catch (loadError) {
-      setPageError(loadError.message);
+      logClientEvent("warn", "session_state_sync_failed", {
+        reason,
+        error: loadError.message,
+      });
+      if (showSpinner) {
+        setPageError(loadError.message);
+      }
+      throw loadError;
     } finally {
-      setIsLoading(false);
+      if (showSpinner) {
+        setIsLoading(false);
+      }
     }
   }
 
   useEffect(() => {
-    loadPage();
+    syncSessionState("page-load", { showSpinner: true }).catch(() => {});
   }, [sessionId, token]);
 
   useEffect(() => {
@@ -301,6 +355,7 @@ export function JournalPage() {
   function startWorkflow(type) {
     setActionError("");
     setPanelMode(null);
+    logClientEvent("info", "guided_action_started", { type });
     setWorkflow({
       type,
       stepIndex: 0,
@@ -321,15 +376,81 @@ export function JournalPage() {
     focusConsoleInput();
   }
 
-  function startCloseWorkflow() {
-    if (position.current_open_size <= 0) {
+  async function getFreshPosition(reason) {
+    const latestPosition = await fetchPosition(token, sessionId);
+    setPosition(latestPosition);
+    logClientEvent("info", "position_refreshed", {
+      reason,
+      refreshedOpenSize: latestPosition.current_open_size,
+    });
+    return latestPosition;
+  }
+
+  async function recoverFromActionError(reason, error, options = {}) {
+    const { resetWorkflow = Boolean(workflow) } = options;
+    logClientEvent("warn", "action_error_recovery_started", {
+      reason,
+      error: error.message,
+      resetWorkflow,
+    });
+
+    if (resetWorkflow) {
       cancelWorkflow();
-      setActionError("There is no open position available to close.");
-      focusConsoleInput();
+    }
+
+    try {
+      await syncSessionState(`recovery:${reason}`);
+    } catch (refreshError) {
+      logClientEvent("warn", "action_error_recovery_sync_failed", {
+        reason,
+        refreshError: refreshError.message,
+      });
+    }
+
+    focusConsoleInput();
+  }
+
+  async function ensureCloseFlowAllowed(source) {
+    const latestPosition = await getFreshPosition(`close-check:${source}`);
+    if (latestPosition.current_open_size > 0) {
+      return latestPosition;
+    }
+
+    const message = "There is no open position available to close.";
+    setActionError(message);
+    logClientEvent("warn", "guided_action_close_blocked", {
+      source,
+      refreshedOpenSize: latestPosition.current_open_size,
+    });
+    cancelWorkflow();
+    return null;
+  }
+
+  async function startCloseWorkflow(source = "toolbar") {
+    if (session?.status !== "open") {
       return;
     }
 
-    startWorkflow("close");
+    setActionError("");
+    setIsSubmitting(true);
+    logClientEvent("info", "guided_action_close_requested", { source });
+
+    try {
+      const latestPosition = await ensureCloseFlowAllowed(source);
+      if (!latestPosition) {
+        return;
+      }
+
+      startWorkflow("close");
+    } catch (error) {
+      setActionError(error.message);
+      await recoverFromActionError(`close-start:${source}`, error, {
+        resetWorkflow: false,
+      });
+    } finally {
+      setIsSubmitting(false);
+      focusConsoleInput();
+    }
   }
 
   async function runSlashCommand(commandText) {
@@ -340,7 +461,7 @@ export function JournalPage() {
         startWorkflow("open");
         return;
       case "/close":
-        startCloseWorkflow();
+        await startCloseWorkflow("slash-command");
         return;
       case "/end":
         setWorkflow(null);
@@ -370,10 +491,16 @@ export function JournalPage() {
     const rawValue = answerText.trim();
 
     if (!rawValue && !step.optional) {
-      throw new Error(`${step.label} is required.`);
+      throw createWorkflowValidationError(`${step.label} is required.`);
     }
 
-    const parsedValue = rawValue ? step.parse(rawValue) : "";
+    let parsedValue = "";
+    try {
+      parsedValue = rawValue ? step.parse(rawValue) : "";
+    } catch (error) {
+      throw createWorkflowValidationError(error.message);
+    }
+
     const nextValues = {
       ...workflow.values,
       [step.key]: parsedValue,
@@ -418,15 +545,29 @@ export function JournalPage() {
                 note: nextValues.note || undefined,
               };
 
+        if (workflow.type === "close") {
+          const latestPosition = await ensureCloseFlowAllowed("guided-submit");
+          if (!latestPosition) {
+            return;
+          }
+
+          if (nextValues.size > latestPosition.current_open_size) {
+            throw new Error("Cannot close more than the current open size.");
+          }
+        }
+
         const tradeEvent =
           workflow.type === "open"
             ? await openTrade(token, sessionId, payload)
             : await closeTrade(token, sessionId, payload);
 
         setTradeEvents((current) => [...current, tradeEvent]);
-        setPosition(await fetchPosition(token, sessionId));
+        setPosition(await getFreshPosition(`${workflow.type}-submit-success`));
       }
 
+      logClientEvent("info", "guided_action_completed", {
+        type: workflow.type,
+      });
       setWorkflow(null);
       setCommandInput("");
       focusConsoleInput();
@@ -445,9 +586,25 @@ export function JournalPage() {
 
   async function handleCommandSubmit(event) {
     event.preventDefault();
+
+    if (isSubmitting) {
+      logClientEvent("info", "composer_submit_ignored", {
+        reason: "already-submitting",
+      });
+      return;
+    }
+
     setActionError("");
+    logClientEvent("info", "composer_submit_received", {
+      hasWorkflow: Boolean(workflow),
+      inputLength: commandInput.length,
+      startsWithSlash: commandInput.trim().startsWith("/"),
+    });
 
     if (session?.status !== "open" && !workflow) {
+      logClientEvent("info", "composer_submit_ignored", {
+        reason: "session-not-open",
+      });
       return;
     }
 
@@ -473,10 +630,14 @@ export function JournalPage() {
         setCommandInput("");
       }
     } catch (submissionError) {
-      if (workflow?.type === "close") {
-        cancelWorkflow();
-      }
+      logClientEvent("warn", "composer_submit_failed", {
+        error: submissionError.message,
+        errorCode: submissionError.code ?? null,
+      });
       setActionError(submissionError.message);
+      if (submissionError.code !== "WORKFLOW_VALIDATION") {
+        await recoverFromActionError("composer-submit", submissionError);
+      }
     } finally {
       setIsSubmitting(false);
       if (session?.status === "open" || panelMode === "end") {
@@ -629,7 +790,7 @@ export function JournalPage() {
             Trade Open
           </Button>
           <Button
-            disabled={session.status !== "open" || isSubmitting}
+            disabled={session.status !== "open" || isSubmitting || position.current_open_size <= 0}
             onClick={startCloseWorkflow}
             type="button"
             variant="secondary"
