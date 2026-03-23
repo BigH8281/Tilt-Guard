@@ -212,6 +212,14 @@ What it validates:
 - screenshot upload plus file serving
 - session closeout and closed-session history
 
+## JournalPage Recovery Rule
+
+For `frontend/src/pages/JournalPage.jsx`, treat the backend as authoritative.
+
+- Any async or server-backed mutation failure must either recover through `recoverFromActionError(...)` so it re-syncs via `syncSessionState(...)`, or stay local-only because no server round-trip happened.
+- Do not add new catch paths that only set an error message if backend state may have changed.
+- Main recovery helper: `recoverFromActionError(...)` in `frontend/src/pages/JournalPage.jsx`.
+
 Notes:
 - the script creates a disposable user and a disposable session on each run
 - no seeded data is required

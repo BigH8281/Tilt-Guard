@@ -1,7 +1,7 @@
 /* @vitest-environment jsdom */
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { cleanup, render, screen, waitFor } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
 
@@ -9,11 +9,13 @@ import { JournalPage } from "./JournalPage";
 import {
   closeTrade,
   createJournalEntry,
+  endSession,
   fetchJournalEntries,
   fetchPosition,
   fetchScreenshots,
   fetchSessionDetail,
   fetchTradeEvents,
+  uploadScreenshot,
 } from "../lib/api";
 
 vi.mock("../context/AuthContext", () => ({
@@ -76,6 +78,12 @@ const openSession = {
   reason_exit_no: null,
 };
 
+const closedSession = {
+  ...openSession,
+  status: "closed",
+  closed_at: "2026-03-23T10:00:00Z",
+};
+
 function renderJournalPage() {
   return render(
     <MemoryRouter initialEntries={["/sessions/1"]}>
@@ -98,6 +106,8 @@ describe("JournalPage close-trade recovery", () => {
     fetchScreenshots.mockResolvedValue([]);
     closeTrade.mockReset();
     createJournalEntry.mockReset();
+    endSession.mockReset();
+    uploadScreenshot.mockReset();
   });
 
   afterEach(() => {
@@ -163,5 +173,80 @@ describe("JournalPage close-trade recovery", () => {
     await waitFor(() => {
       expect(createJournalEntry).toHaveBeenCalledWith("test-token", "1", "Recovered note");
     });
+  });
+
+  it("resyncs authoritative state after screenshot upload fails because the session changed elsewhere", async () => {
+    fetchSessionDetail.mockResolvedValueOnce(openSession).mockResolvedValueOnce(closedSession);
+    fetchPosition.mockResolvedValueOnce({ current_open_size: 1 }).mockResolvedValueOnce({
+      current_open_size: 0,
+    });
+    fetchTradeEvents.mockResolvedValueOnce([]).mockResolvedValueOnce([]);
+    fetchScreenshots.mockResolvedValueOnce([]).mockResolvedValueOnce([
+      {
+        id: 77,
+        screenshot_type: "post",
+        file_path: "uploads/77.png",
+        file_url: "/uploads/77.png",
+        uploaded_at: "2026-03-23T10:00:00Z",
+      },
+    ]);
+    uploadScreenshot.mockRejectedValue(new Error("Session is already closed."));
+
+    renderJournalPage();
+
+    await screen.findByText("Trade Close");
+    const fileInput = document.querySelector('input[type="file"]');
+    const file = new File(["image"], "journal.png", { type: "image/png" });
+
+    fireEvent.change(fileInput, {
+      target: { files: [file] },
+    });
+
+    expect(await screen.findByText("Session is already closed.")).toBeTruthy();
+    await waitFor(() => {
+      expect(screen.getAllByText("closed").length).toBeGreaterThan(0);
+    });
+    expect(screen.getByText("Session detail")).toBeTruthy();
+    expect(screen.getByText("0 open")).toBeTruthy();
+  });
+
+  it("resyncs authoritative state after end-session fails because the session closed elsewhere", async () => {
+    fetchSessionDetail.mockResolvedValueOnce(openSession).mockResolvedValueOnce(closedSession);
+    fetchPosition.mockResolvedValueOnce({ current_open_size: 0 }).mockResolvedValueOnce({
+      current_open_size: 0,
+    });
+    fetchTradeEvents.mockResolvedValueOnce([]).mockResolvedValueOnce([]);
+    fetchScreenshots.mockResolvedValueOnce([
+      {
+        id: 88,
+        screenshot_type: "post",
+        file_path: "uploads/88.png",
+        file_url: "/uploads/88.png",
+        uploaded_at: "2026-03-23T09:45:00Z",
+      },
+    ]).mockResolvedValueOnce([
+      {
+        id: 88,
+        screenshot_type: "post",
+        file_path: "uploads/88.png",
+        file_url: "/uploads/88.png",
+        uploaded_at: "2026-03-23T09:45:00Z",
+      },
+    ]);
+    endSession.mockRejectedValue(new Error("Session is already closed."));
+
+    const user = userEvent.setup();
+    renderJournalPage();
+
+    const endButton = await screen.findByRole("button", { name: "End Session" });
+    await user.click(endButton);
+    await user.click(screen.getByRole("button", { name: "Confirm close" }));
+
+    expect(await screen.findByText("Session is already closed.")).toBeTruthy();
+    await waitFor(() => {
+      expect(screen.getAllByText("closed").length).toBeGreaterThan(0);
+    });
+    expect(screen.getByText("Session detail")).toBeTruthy();
+    expect(screen.getByText("Closed")).toBeTruthy();
   });
 });

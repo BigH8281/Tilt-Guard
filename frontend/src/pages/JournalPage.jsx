@@ -675,6 +675,9 @@ export function JournalPage() {
         );
       } else {
         setActionError(captureError.message);
+        await recoverFromActionError("journal-screenshot-upload", captureError, {
+          resetWorkflow: false,
+        });
       }
     } finally {
       setIsSubmitting(false);
@@ -695,6 +698,9 @@ export function JournalPage() {
       await uploadJournalScreenshot(file);
     } catch (uploadError) {
       setActionError(uploadError.message);
+      await recoverFromActionError("manual-journal-screenshot-upload", uploadError, {
+        resetWorkflow: false,
+      });
     } finally {
       setIsSubmitting(false);
       event.target.value = "";
@@ -720,8 +726,14 @@ export function JournalPage() {
       navigate("/");
     } catch (submissionError) {
       setActionError(submissionError.message);
+      if (submissionError.message !== "Upload a post-session screenshot before closing.") {
+        await recoverFromActionError("end-session", submissionError, {
+          resetWorkflow: false,
+        });
+      }
     } finally {
       setIsSubmitting(false);
+      focusConsoleInput();
     }
   }
 
