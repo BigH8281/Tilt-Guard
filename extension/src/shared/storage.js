@@ -1,6 +1,12 @@
+import { EXTENSION_CONFIG } from "./extension-config.js";
+
 export const STORAGE_KEYS = {
+  mode: "mode",
   apiBaseUrl: "apiBaseUrl",
+  appBaseUrl: "appBaseUrl",
   authToken: "authToken",
+  authUserEmail: "authUserEmail",
+  authSyncedAt: "authSyncedAt",
   telemetryQueue: "telemetryQueue",
   lastKnownStatus: "lastKnownStatus",
   lastAttemptAt: "lastAttemptAt",
@@ -14,8 +20,12 @@ export const STORAGE_KEYS = {
 };
 
 export const DEFAULT_SETTINGS = {
-  apiBaseUrl: "http://127.0.0.1:8000",
+  mode: EXTENSION_CONFIG.mode,
+  apiBaseUrl: EXTENSION_CONFIG.apiBaseUrl,
+  appBaseUrl: EXTENSION_CONFIG.appBaseUrl,
   authToken: "",
+  authUserEmail: "",
+  authSyncedAt: "",
 };
 
 export async function getStorage(keys) {
@@ -27,9 +37,20 @@ export async function setStorage(values) {
 }
 
 export async function getSettings() {
-  const stored = await getStorage([STORAGE_KEYS.apiBaseUrl, STORAGE_KEYS.authToken]);
+  const stored = await getStorage([
+    STORAGE_KEYS.mode,
+    STORAGE_KEYS.apiBaseUrl,
+    STORAGE_KEYS.appBaseUrl,
+    STORAGE_KEYS.authToken,
+    STORAGE_KEYS.authUserEmail,
+    STORAGE_KEYS.authSyncedAt,
+  ]);
   return {
+    mode: stored[STORAGE_KEYS.mode] || DEFAULT_SETTINGS.mode,
     apiBaseUrl: stored[STORAGE_KEYS.apiBaseUrl] || DEFAULT_SETTINGS.apiBaseUrl,
+    appBaseUrl: stored[STORAGE_KEYS.appBaseUrl] || DEFAULT_SETTINGS.appBaseUrl,
     authToken: stored[STORAGE_KEYS.authToken] || DEFAULT_SETTINGS.authToken,
+    authUserEmail: stored[STORAGE_KEYS.authUserEmail] || DEFAULT_SETTINGS.authUserEmail,
+    authSyncedAt: stored[STORAGE_KEYS.authSyncedAt] || DEFAULT_SETTINGS.authSyncedAt,
   };
 }

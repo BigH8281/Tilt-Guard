@@ -1,4 +1,5 @@
 import { createLogger } from "../shared/log.js";
+import { EXTENSION_CONFIG } from "../shared/extension-config.js";
 import { OBSERVER_CONFIG } from "../shared/selectors.js";
 import { DEFAULT_SETTINGS, STORAGE_KEYS, getSettings, getStorage, setStorage } from "../shared/storage.js";
 
@@ -27,6 +28,32 @@ async function setLastStatus(status) {
 
 function buildIngestUrl(apiBaseUrl) {
   return `${apiBaseUrl.replace(/\/$/, "")}/broker-telemetry/ingest`;
+}
+
+function normaliseOrigin(value) {
+  if (!value) {
+    return null;
+  }
+
+  try {
+    return new URL(value).origin;
+  } catch {
+    return null;
+  }
+}
+
+function getAllowedExternalOrigins() {
+  return new Set(
+    [DEFAULT_SETTINGS.appBaseUrl, ...(EXTENSION_CONFIG.allowedExternalOrigins || [])]
+      .map((value) => normaliseOrigin(value))
+      .filter(Boolean),
+  );
+}
+
+function isTrustedExternalSender(sender) {
+  const allowedOrigins = getAllowedExternalOrigins();
+  const senderOrigin = normaliseOrigin(sender?.origin || sender?.url || "");
+  return senderOrigin ? allowedOrigins.has(senderOrigin) : false;
 }
 
 async function setFlushState(partialState) {
@@ -119,7 +146,9 @@ async function ensureAlarm() {
 
 chrome.runtime.onInstalled.addListener(async () => {
   await setStorage({
+    [STORAGE_KEYS.mode]: DEFAULT_SETTINGS.mode,
     [STORAGE_KEYS.apiBaseUrl]: DEFAULT_SETTINGS.apiBaseUrl,
+    [STORAGE_KEYS.appBaseUrl]: DEFAULT_SETTINGS.appBaseUrl,
   });
   await ensureAlarm();
 });
@@ -193,8 +222,8 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   if (message?.type === "telemetry:update-settings") {
     void (async () => {
       await setStorage({
-        [STORAGE_KEYS.apiBaseUrl]: message.payload.apiBaseUrl,
-        [STORAGE_KEYS.authToken]: message.payload.authToken,
+        [STORAGE_KEYS.apiBaseUrl]: message.payload.apiBaseUrl || DEFAULT_SETTINGS.apiBaseUrl,
+        [STORAGE_KEYS.appBaseUrl]: message.payload.appBaseUrl || DEFAULT_SETTINGS.appBaseUrl,
       });
       try {
         await flushQueue("settings_update");
@@ -214,6 +243,52 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       } catch (error) {
         sendResponse({ ok: false, error: String(error) });
       }
+    })();
+    return true;
+  }
+
+  return false;
+});
+
+chrome.runtime.onMessageExternal.addListener((message, sender, sendResponse) => {
+  if (message?.type === "tiltguard:auth-sync") {
+    void (async () => {
+      if (!isTrustedExternalSender(sender)) {
+        logger.warn("external_auth_sync_rejected", { sender: sender?.url || sender?.origin || null });
+        sendResponse({ ok: false, error: "untrusted_sender" });
+        return;
+      }
+
+      await setStorage({
+        [STORAGE_KEYS.authToken]: message.payload.accessToken,
+        [STORAGE_KEYS.authUserEmail]: message.payload.userEmail || "",
+        [STORAGE_KEYS.authSyncedAt]: new Date().toISOString(),
+      });
+
+      try {
+        await flushQueue("external_auth_sync");
+      } catch (error) {
+        logger.warn("flush_failed_after_external_auth_sync", { error: String(error) });
+      }
+
+      sendResponse({ ok: true });
+    })();
+    return true;
+  }
+
+  if (message?.type === "tiltguard:auth-clear") {
+    void (async () => {
+      if (!isTrustedExternalSender(sender)) {
+        sendResponse({ ok: false, error: "untrusted_sender" });
+        return;
+      }
+
+      await setStorage({
+        [STORAGE_KEYS.authToken]: "",
+        [STORAGE_KEYS.authUserEmail]: "",
+        [STORAGE_KEYS.authSyncedAt]: "",
+      });
+      sendResponse({ ok: true });
     })();
     return true;
   }

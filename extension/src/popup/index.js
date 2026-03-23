@@ -1,14 +1,19 @@
-const apiBaseUrlInput = document.querySelector("#apiBaseUrl");
-const authTokenInput = document.querySelector("#authToken");
-const saveButton = document.querySelector("#saveButton");
+const modeValue = document.querySelector("#modeValue");
+const apiBaseUrlValue = document.querySelector("#apiBaseUrlValue");
+const appBaseUrlValue = document.querySelector("#appBaseUrlValue");
+const authStateValue = document.querySelector("#authStateValue");
+const authUserValue = document.querySelector("#authUserValue");
+const authSyncedAtValue = document.querySelector("#authSyncedAtValue");
+const connectButton = document.querySelector("#connectButton");
+const disconnectButton = document.querySelector("#disconnectButton");
 const flushButton = document.querySelector("#flushButton");
 const summary = document.querySelector("#summary");
 const statusBody = document.querySelector("#statusBody");
 const queueBody = document.querySelector("#queueBody");
 
 function formatFlushSummary(payload) {
-  const snapshot = payload.status.snapshot;
-  const broker = snapshot.broker || {};
+  const snapshot = payload.status?.snapshot;
+  const broker = snapshot?.broker || {};
 
   if (payload.lastFlushOutcome === "failed") {
     return broker.broker_connected
@@ -34,14 +39,14 @@ function formatFlushSummary(payload) {
       : "Observing TradingView locally only, waiting to sync";
   }
 
-  return broker.broker_connected
-    ? `Connected locally only: ${broker.broker_label || "Unknown broker"}`
-    : "TradingView observed locally only, broker not confirmed connected";
+  return payload.settings.authToken
+    ? "Journal connected. Open a TradingView chart to start syncing."
+    : "Connect the journal to enable backend sync.";
 }
 
 function renderStatus(payload) {
   if (!payload?.status) {
-    summary.textContent = "No TradingView telemetry observed yet.";
+    summary.textContent = formatFlushSummary(payload);
     statusBody.textContent = "Open a TradingView chart page with the content script active.";
     return;
   }
@@ -55,6 +60,7 @@ function renderStatus(payload) {
       pageUrl: payload.status.pageUrl,
       updatedAt: payload.status.updatedAt,
       configuredApiBaseUrl: payload.settings.apiBaseUrl || null,
+      configuredAppBaseUrl: payload.settings.appBaseUrl || null,
       lastAttemptUrl: payload.lastAttemptUrl,
       lastFlushOutcome: payload.lastFlushOutcome || "never_attempted",
       lastAttemptAt: payload.lastAttemptAt,
@@ -72,9 +78,11 @@ function renderStatus(payload) {
 
 function renderQueue(payload) {
   const lines = [
+    `mode: ${payload.settings.mode || "unknown"}`,
     `configuredApiBaseUrl: ${payload.settings.apiBaseUrl || "unset"}`,
-    `lastAttemptUrl: ${payload.lastAttemptUrl || "never"}`,
+    `configuredAppBaseUrl: ${payload.settings.appBaseUrl || "unset"}`,
     `queueDepth: ${payload.queueDepth}`,
+    `lastAttemptUrl: ${payload.lastAttemptUrl || "never"}`,
     `lastFlushOutcome: ${payload.lastFlushOutcome || "never_attempted"}`,
     `lastAttemptAt: ${payload.lastAttemptAt || "never"}`,
     `lastSuccessAt: ${payload.lastSuccessAt || "never"}`,
@@ -86,26 +94,51 @@ function renderQueue(payload) {
   queueBody.textContent = lines.join("\n");
 }
 
+function renderConnection(payload) {
+  modeValue.textContent = payload.settings.mode || "Unknown";
+  apiBaseUrlValue.textContent = payload.settings.apiBaseUrl || "unset";
+  appBaseUrlValue.textContent = payload.settings.appBaseUrl || "unset";
+  authStateValue.textContent = payload.settings.authToken ? "Connected" : "Not connected";
+  authUserValue.textContent = payload.settings.authUserEmail || "Unknown";
+  authSyncedAtValue.textContent = payload.settings.authSyncedAt || "Never";
+  disconnectButton.disabled = !payload.settings.authToken;
+}
+
+async function loadStatus() {
+  return chrome.runtime.sendMessage({ type: "telemetry:get-status" });
+}
+
 async function refresh() {
-  const response = await chrome.runtime.sendMessage({ type: "telemetry:get-status" });
+  const response = await loadStatus();
   if (!response?.ok) {
     summary.textContent = "Unable to load extension status.";
     return;
   }
 
-  apiBaseUrlInput.value = response.settings.apiBaseUrl || "";
-  authTokenInput.value = response.settings.authToken || "";
+  renderConnection(response);
   renderStatus(response);
   renderQueue(response);
 }
 
-saveButton.addEventListener("click", async () => {
-  await chrome.runtime.sendMessage({
-    type: "telemetry:update-settings",
-    payload: {
-      apiBaseUrl: apiBaseUrlInput.value.trim(),
-      authToken: authTokenInput.value.trim(),
-    },
+connectButton.addEventListener("click", async () => {
+  const response = await loadStatus();
+  const appBaseUrl = response?.settings?.appBaseUrl;
+  if (!appBaseUrl) {
+    summary.textContent = "Journal URL is not configured for this mode.";
+    return;
+  }
+
+  const connectUrl = new URL("/extension/connect", appBaseUrl);
+  connectUrl.searchParams.set("extensionId", chrome.runtime.id);
+  connectUrl.searchParams.set("mode", response.settings.mode || "");
+  await chrome.tabs.create({ url: connectUrl.toString() });
+});
+
+disconnectButton.addEventListener("click", async () => {
+  await chrome.storage.local.set({
+    authToken: "",
+    authUserEmail: "",
+    authSyncedAt: "",
   });
   await refresh();
 });

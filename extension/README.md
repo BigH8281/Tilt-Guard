@@ -1,47 +1,54 @@
 # Tilt Guard Telemetry Extension
 
-This is a plain MV3 extension scaffold for the first TradingView broker telemetry slice.
+The extension now supports explicit environment modes and a journal-driven auth handshake.
 
-## Load locally
+## Load targets
 
-1. Open `chrome://extensions` or `edge://extensions`.
-2. Enable Developer Mode.
-3. Choose `Load unpacked`.
-4. Select the [`extension`](/home/higgo/code/Tilt-Guard/extension) folder.
-5. Open the extension popup and set:
-   - `API Base URL`: `http://127.0.0.1:8000`
-   - `Auth Token`: a fresh JWT from the currently running local backend
-6. Reload the extension after selector changes, then refresh the live TradingView chart tab.
+- Raw source local default: load [`extension/`](/home/higgo/code/Tilt-Guard/extension)
+- Generated local build: load [`extension/dist/local/`](/home/higgo/code/Tilt-Guard/extension/dist/local)
+- Generated hosted build: load [`extension/dist/hosted/`](/home/higgo/code/Tilt-Guard/extension/dist/hosted)
 
-## Current scope
+Chrome still loads the extension as an unpacked folder. There is no packed build step required.
 
-- Detect TradingView chart pages
-- Detect mounted trading surface and trading panel root
-- Detect FXCM-connected footer signature
-- Queue append-only telemetry events locally
-- Batch-send raw telemetry to the backend ingest endpoint
+## Build mode-specific unpacked folders
 
-## Current limits
+Local:
 
-- No enforcement behavior
-- No position/order/fill extraction
-- No class-based selector dependence
-- Built for TradingView-first, FXCM-aware observation
+```bash
+python scripts/build_extension.py --mode local
+```
 
-## Quick local verification
+Hosted:
 
-1. Start the backend locally:
-   - `set -a && source .env && set +a && ./.venv/bin/python -m uvicorn app.main:app --host 127.0.0.1 --port 8000`
-2. Mint a fresh JWT from that same backend:
-   - `curl -sS -X POST http://127.0.0.1:8000/login -H 'Content-Type: application/json' -d '{"email":"andrew8281@me.com","password":"Command1@1"}'`
-3. Reload the unpacked extension and refresh the FXCM-connected TradingView chart.
-4. Read back recent telemetry:
-   - `curl -sS "http://127.0.0.1:8000/broker-telemetry/events?limit=20" -H "Authorization: Bearer <fresh JWT>"`
-5. In the newest snapshot, verify:
-   - `broker_connected = true`
-   - `broker_label = "FXCM Live"`
-   - `fxcm_footer_cluster_visible = true`
-   - `account_manager_control_visible = true`
-   - `panel_open_control_visible = true`
-   - `panel_maximize_control_visible = true`
-   - `order_entry_control_visible = true`
+```bash
+python scripts/build_extension.py \
+  --mode hosted \
+  --app-base-url https://<frontend-domain> \
+  --api-base-url https://<backend-domain>
+```
+
+## Auth flow
+
+1. Load the unpacked extension folder for the mode you want.
+2. Open the popup.
+3. Click `Connect Journal`.
+4. Sign in through the journal UI if needed.
+5. The `/extension/connect` page sends the current JWT to the extension through `chrome.runtime.sendMessage(...)`.
+6. Return to the popup to confirm `Auth: Connected`.
+
+No token copy/paste is required.
+
+## Local verification
+
+1. Start the local stack.
+2. Load either [`extension/`](/home/higgo/code/Tilt-Guard/extension) or [`extension/dist/local/`](/home/higgo/code/Tilt-Guard/extension/dist/local).
+3. Click `Connect Journal` and sign in locally.
+4. Open a live TradingView chart.
+5. Use `Flush Now` in the popup or wait for the background alarm.
+
+## Hosted verification
+
+1. Build the hosted unpacked folder with the real frontend/backend URLs.
+2. Load [`extension/dist/hosted/`](/home/higgo/code/Tilt-Guard/extension/dist/hosted).
+3. Click `Connect Journal` and sign in against the hosted journal.
+4. Confirm the popup shows the hosted API/journal URLs and `Auth: Connected`.

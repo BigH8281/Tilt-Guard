@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { useNavigate } from "react-router-dom";
+import { useNavigate, useSearchParams } from "react-router-dom";
 
 import { Button } from "../components/Button";
 import { Field } from "../components/Field";
@@ -7,6 +7,7 @@ import { useAuth } from "../context/AuthContext";
 
 export function AuthPage() {
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
   const { login, register } = useAuth();
   const [mode, setMode] = useState("login");
   const [form, setForm] = useState({
@@ -15,6 +16,7 @@ export function AuthPage() {
   });
   const [error, setError] = useState("");
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const next = searchParams.get("next") || "/";
 
   function updateField(name, value) {
     setForm((current) => ({
@@ -35,7 +37,7 @@ export function AuthPage() {
         await register(form.email, form.password);
       }
 
-      navigate("/", { replace: true });
+      navigate(next, { replace: true });
     } catch (submissionError) {
       setError(submissionError.message);
     } finally {

@@ -226,6 +226,36 @@ Notes:
 - the target backend must already be running and reachable
 - use `VALIDATION_BASE_URL` or `--base-url` to target a hosted deployment
 
+## Extension Modes And Auth Sync
+
+The Chrome extension now supports explicit `LOCAL` and `HOSTED` unpacked builds plus a browser-based auth handshake.
+
+Build the unpacked extension folder you want to load:
+
+```bash
+python scripts/build_extension.py --mode local
+```
+
+```bash
+python scripts/build_extension.py \
+  --mode hosted \
+  --app-base-url https://<frontend-domain> \
+  --api-base-url https://<backend-domain>
+```
+
+Load one of these folders in `chrome://extensions`:
+- [`extension/`](/home/higgo/code/Tilt-Guard/extension) for the source local-default version
+- [`extension/dist/local/`](/home/higgo/code/Tilt-Guard/extension/dist/local) for the generated local mode
+- [`extension/dist/hosted/`](/home/higgo/code/Tilt-Guard/extension/dist/hosted) for the generated hosted mode
+
+To authenticate the extension:
+- open the popup
+- click `Connect Journal`
+- sign in through the journal UI if needed
+- let the `/extension/connect` page sync the current JWT into extension storage
+
+This replaces the manual token copy/paste flow for normal use.
+
 ## Screenshot Persistence Smoke Check
 
 Use the same validation script for the narrow post-deploy screenshot persistence check.

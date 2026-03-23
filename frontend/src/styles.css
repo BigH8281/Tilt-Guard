@@ -173,6 +173,7 @@ img {
 
 .ghost-button {
   padding: 0.7rem 0.95rem;
+  text-decoration: none;
 }
 
 .icon-button {
@@ -837,6 +838,12 @@ img {
   background: rgba(255, 196, 102, 0.14);
   border: 1px solid rgba(255, 196, 102, 0.22);
   color: #ffd79d;
+}
+
+.success-alert {
+  background: rgba(114, 247, 196, 0.14);
+  border: 1px solid rgba(114, 247, 196, 0.24);
+  color: #bdf7e8;
 }
 
 .empty-state {
