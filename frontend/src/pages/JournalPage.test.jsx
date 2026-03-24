@@ -17,6 +17,13 @@ import {
   fetchTradeEvents,
   uploadScreenshot,
 } from "../lib/api";
+import {
+  getPreSessionScreenshotFile,
+  getPreSessionScreenshotState,
+  markPreSessionScreenshotFailed,
+  markPreSessionScreenshotSucceeded,
+  markPreSessionScreenshotUploading,
+} from "../lib/preSessionScreenshot";
 
 vi.mock("../context/AuthContext", () => ({
   useAuth: () => ({
@@ -57,6 +64,16 @@ vi.mock("../lib/api", () => ({
 
 vi.mock("../lib/screenCapture", () => ({
   captureDisplayFrame: vi.fn(),
+}));
+
+vi.mock("../lib/preSessionScreenshot", () => ({
+  clearPreSessionScreenshotState: vi.fn(),
+  getPreSessionScreenshotFile: vi.fn(),
+  getPreSessionScreenshotState: vi.fn(),
+  markPreSessionScreenshotFailed: vi.fn(),
+  markPreSessionScreenshotSucceeded: vi.fn(),
+  markPreSessionScreenshotUploading: vi.fn(),
+  queuePreSessionScreenshot: vi.fn(),
 }));
 
 const openSession = {
@@ -104,10 +121,13 @@ describe("JournalPage close-trade recovery", () => {
     fetchJournalEntries.mockResolvedValue([]);
     fetchTradeEvents.mockResolvedValue([]);
     fetchScreenshots.mockResolvedValue([]);
+    fetchPosition.mockResolvedValue({ current_open_size: 1 });
     closeTrade.mockReset();
     createJournalEntry.mockReset();
     endSession.mockReset();
     uploadScreenshot.mockReset();
+    getPreSessionScreenshotState.mockReturnValue(null);
+    getPreSessionScreenshotFile.mockReturnValue(null);
   });
 
   afterEach(() => {
@@ -222,6 +242,59 @@ describe("JournalPage close-trade recovery", () => {
     expect(await screen.findByText("NY AM")).toBeTruthy();
     expect(screen.getByText("Some session data could not be refreshed: trade events.")).toBeTruthy();
     expect(screen.getByText("1 open")).toBeTruthy();
+  });
+
+  it("uploads a queued pre-session screenshot after the journal opens", async () => {
+    const queuedFile = new File(["image"], "pre.png", { type: "image/png" });
+    getPreSessionScreenshotState.mockReturnValue({
+      sessionId: 1,
+      status: "queued",
+      fileName: "pre.png",
+      error: "",
+    });
+    getPreSessionScreenshotFile.mockReturnValue(queuedFile);
+    uploadScreenshot.mockResolvedValue({
+      id: 55,
+      screenshot_type: "pre",
+      file_path: "screenshots/1/pre.png",
+      file_url: "/uploads/screenshots/1/pre.png",
+      uploaded_at: "2026-03-23T09:01:00Z",
+    });
+
+    renderJournalPage();
+
+    expect(await screen.findByAltText("pre screenshot")).toBeTruthy();
+    await waitFor(() => {
+      expect(markPreSessionScreenshotUploading).toHaveBeenCalledWith("1");
+      expect(markPreSessionScreenshotSucceeded).toHaveBeenCalledWith("1");
+      expect(uploadScreenshot).toHaveBeenCalledWith("test-token", "1", "pre", queuedFile);
+    });
+  });
+
+  it("shows a persistent warning when opening screenshot upload fails", async () => {
+    const queuedFile = new File(["image"], "pre.png", { type: "image/png" });
+    getPreSessionScreenshotState
+      .mockReturnValueOnce({
+        sessionId: 1,
+        status: "queued",
+        fileName: "pre.png",
+        error: "",
+      })
+      .mockReturnValue({
+        sessionId: 1,
+        status: "failed",
+        fileName: "pre.png",
+        error: "Invalid or missing authentication credentials.",
+      });
+    getPreSessionScreenshotFile.mockReturnValue(queuedFile);
+    uploadScreenshot.mockRejectedValue(new Error("Invalid or missing authentication credentials."));
+
+    renderJournalPage();
+
+    expect(
+      await screen.findByText(/Opening screenshot upload failed\. You can continue journaling and retry now or later\./),
+    ).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Retry now" })).toBeTruthy();
   });
 
   it("resyncs authoritative state after end-session fails because the session closed elsewhere", async () => {

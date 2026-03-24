@@ -1,3 +1,4 @@
+import logging
 from pathlib import Path
 from uuid import uuid4
 
@@ -8,6 +9,9 @@ from app.models.screenshot import Screenshot
 from app.models.trading_session import TradingSession
 from app.services.session import ensure_session_is_open
 from app.storage import ensure_storage_root, get_storage_path
+
+
+logger = logging.getLogger(__name__)
 
 
 def save_screenshot(
@@ -25,9 +29,24 @@ def save_screenshot(
     storage_key = f"screenshots/{session.id}/{stored_name}"
     file_path = get_storage_path(storage_key)
     file_path.parent.mkdir(parents=True, exist_ok=True)
+    logger.info(
+        "screenshot_upload_started session_id=%s type=%s storage_key=%s",
+        session.id,
+        screenshot_type,
+        storage_key,
+    )
 
-    with file_path.open("wb") as output_file:
-        output_file.write(upload.file.read())
+    try:
+        with file_path.open("wb") as output_file:
+            output_file.write(upload.file.read())
+    except Exception:
+        logger.exception(
+            "screenshot_upload_file_write_failed session_id=%s type=%s storage_key=%s",
+            session.id,
+            screenshot_type,
+            storage_key,
+        )
+        raise
 
     screenshot = Screenshot(
         session_id=session.id,
@@ -37,4 +56,11 @@ def save_screenshot(
     db.add(screenshot)
     db.commit()
     db.refresh(screenshot)
+    logger.info(
+        "screenshot_upload_succeeded session_id=%s screenshot_id=%s type=%s storage_key=%s",
+        session.id,
+        screenshot.id,
+        screenshot_type,
+        storage_key,
+    )
     return screenshot

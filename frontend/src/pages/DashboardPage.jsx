@@ -14,9 +14,9 @@ import {
   fetchPosition,
   fetchSessions,
   fetchTradeEvents,
-  uploadScreenshot,
 } from "../lib/api";
 import { formatCurrency, formatDateTime } from "../lib/format";
+import { queuePreSessionScreenshot } from "../lib/preSessionScreenshot";
 
 function buildRow(session, trades) {
   return {
@@ -175,12 +175,20 @@ export function DashboardPage() {
 
     try {
       const session = await createSession(token, form);
+      logDashboardEvent("info", "session_create_succeeded", {
+        sessionId: session.id,
+        hasPreSessionScreenshot: Boolean(screenshot),
+      });
+
       if (screenshot) {
-        await uploadScreenshot(token, session.id, "pre", screenshot);
+        queuePreSessionScreenshot(session.id, screenshot);
+        logDashboardEvent("info", "pre_session_screenshot_queued", {
+          sessionId: session.id,
+          fileName: screenshot.name,
+        });
       }
 
       setIsModalOpen(false);
-      await loadDashboard();
       navigate(`/sessions/${session.id}`);
     } catch (submissionError) {
       setModalError(submissionError.message);

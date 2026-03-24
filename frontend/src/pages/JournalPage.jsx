@@ -24,6 +24,15 @@ import {
   uploadScreenshot,
 } from "../lib/api";
 import { formatDateTime } from "../lib/format";
+import {
+  clearPreSessionScreenshotState,
+  getPreSessionScreenshotFile,
+  getPreSessionScreenshotState,
+  markPreSessionScreenshotFailed,
+  markPreSessionScreenshotSucceeded,
+  markPreSessionScreenshotUploading,
+  queuePreSessionScreenshot,
+} from "../lib/preSessionScreenshot";
 import { captureDisplayFrame } from "../lib/screenCapture";
 
 const GUIDED_WORKFLOWS = {
@@ -220,6 +229,7 @@ export function JournalPage() {
   const navigate = useNavigate();
   const commandInputRef = useRef(null);
   const filePickerRef = useRef(null);
+  const filePickerModeRef = useRef("journal");
   const logRef = useRef(null);
   const { sessionId } = useParams();
   const { token } = useAuth();
@@ -238,12 +248,15 @@ export function JournalPage() {
   const [pageError, setPageError] = useState("");
   const [actionError, setActionError] = useState("");
   const [viewMode, setViewMode] = useState(getStoredJournalViewMode);
+  const [preSessionScreenshotUpload, setPreSessionScreenshotUpload] = useState(null);
+  const [isPreSessionScreenshotUploading, setIsPreSessionScreenshotUploading] = useState(false);
 
   const feed = useMemo(
     () => buildFeed(journalEntries, tradeEvents, screenshots),
     [journalEntries, screenshots, tradeEvents],
   );
   const hasPostScreenshot = screenshots.some((shot) => shot.screenshot_type === "post");
+  const hasPreScreenshot = screenshots.some((shot) => shot.screenshot_type === "pre");
   const isMinimizedMode = viewMode === "minimized";
   const activePrompt = workflow
     ? GUIDED_WORKFLOWS[workflow.type][workflow.stepIndex]
@@ -264,6 +277,10 @@ export function JournalPage() {
       window.localStorage.setItem(JOURNAL_VIEW_MODE_STORAGE_KEY, viewMode);
     }
   }, [viewMode]);
+
+  useEffect(() => {
+    setPreSessionScreenshotUpload(getPreSessionScreenshotState(sessionId));
+  }, [sessionId]);
 
   useEffect(() => {
     if (typeof document === "undefined") {
@@ -291,6 +308,10 @@ export function JournalPage() {
     };
     const logger = console[level] ?? console.info;
     logger("[JournalPage]", payload);
+  }
+
+  function syncPreSessionScreenshotState() {
+    setPreSessionScreenshotUpload(getPreSessionScreenshotState(sessionId));
   }
 
   function focusConsoleInput() {
@@ -392,6 +413,19 @@ export function JournalPage() {
         setPageError(refreshError);
       }
 
+      if (screenshotResult.status === "fulfilled") {
+        const hasPre = screenshotResult.value.some((shot) => shot.screenshot_type === "pre");
+        if (hasPre) {
+          if (getPreSessionScreenshotState(sessionId)) {
+            markPreSessionScreenshotSucceeded(sessionId);
+            syncPreSessionScreenshotState();
+          }
+          setIsPreSessionScreenshotUploading(false);
+        } else {
+          syncPreSessionScreenshotState();
+        }
+      }
+
       logClientEvent("info", "session_state_sync_completed", {
         reason,
         syncedSessionStatus: sessionResponse.status,
@@ -430,6 +464,35 @@ export function JournalPage() {
   useEffect(() => {
     syncSessionState("page-load", { showSpinner: true }).catch(() => {});
   }, [sessionId, token]);
+
+  useEffect(() => {
+    if (!session || session.status !== "open" || hasPreScreenshot) {
+      if (hasPreScreenshot) {
+        if (getPreSessionScreenshotState(sessionId)) {
+          markPreSessionScreenshotSucceeded(sessionId);
+          syncPreSessionScreenshotState();
+        }
+        setIsPreSessionScreenshotUploading(false);
+      }
+      return;
+    }
+
+    const pendingUpload = getPreSessionScreenshotState(sessionId);
+    const queuedFile = getPreSessionScreenshotFile(sessionId);
+    setPreSessionScreenshotUpload(pendingUpload);
+
+    if (pendingUpload?.status === "queued" && queuedFile && !isPreSessionScreenshotUploading) {
+      void uploadPreSessionScreenshot(queuedFile, {
+        reason: "auto-start",
+      });
+    } else if (pendingUpload?.status === "queued" && !queuedFile) {
+      markPreSessionScreenshotFailed(
+        sessionId,
+        "Opening screenshot upload was interrupted. Select the screenshot again to retry.",
+      );
+      syncPreSessionScreenshotState();
+    }
+  }, [hasPreScreenshot, isPreSessionScreenshotUploading, session, sessionId]);
 
   useEffect(() => {
     if (logRef.current) {
@@ -753,6 +816,41 @@ export function JournalPage() {
     setScreenshots((current) => [...current, screenshot]);
   }
 
+  async function uploadPreSessionScreenshot(file, { reason }) {
+    if (!session || session.status !== "open") {
+      return;
+    }
+
+    setIsPreSessionScreenshotUploading(true);
+    markPreSessionScreenshotUploading(sessionId);
+    syncPreSessionScreenshotState();
+    logClientEvent("info", "pre_session_screenshot_upload_started", {
+      reason,
+      fileName: file.name,
+    });
+
+    try {
+      const screenshot = await uploadScreenshot(token, sessionId, "pre", file);
+      setScreenshots((current) => [...current, screenshot]);
+      markPreSessionScreenshotSucceeded(sessionId);
+      syncPreSessionScreenshotState();
+      logClientEvent("info", "pre_session_screenshot_upload_succeeded", {
+        reason,
+        screenshotId: screenshot.id,
+      });
+    } catch (uploadError) {
+      markPreSessionScreenshotFailed(sessionId, uploadError.message);
+      syncPreSessionScreenshotState();
+      logClientEvent("warn", "pre_session_screenshot_upload_failed", {
+        reason,
+        error: uploadError.message,
+        status: uploadError.status ?? null,
+      });
+    } finally {
+      setIsPreSessionScreenshotUploading(false);
+    }
+  }
+
   async function handleCaptureScreenshot() {
     if (session.status !== "open") {
       return;
@@ -793,21 +891,71 @@ export function JournalPage() {
       return;
     }
 
-    setIsSubmitting(true);
-    setActionError("");
-
     try {
-      await uploadJournalScreenshot(file);
+      if (filePickerModeRef.current === "pre") {
+        await uploadPreSessionScreenshot(file, { reason: "manual-retry" });
+      } else {
+        setIsSubmitting(true);
+        setActionError("");
+        await uploadJournalScreenshot(file);
+      }
     } catch (uploadError) {
-      setActionError(uploadError.message);
-      await recoverFromActionError("manual-journal-screenshot-upload", uploadError, {
-        resetWorkflow: false,
-      });
+      if (filePickerModeRef.current === "pre") {
+        markPreSessionScreenshotFailed(sessionId, uploadError.message);
+        syncPreSessionScreenshotState();
+      } else {
+        setActionError(uploadError.message);
+        await recoverFromActionError("manual-journal-screenshot-upload", uploadError, {
+          resetWorkflow: false,
+        });
+      }
     } finally {
       setIsSubmitting(false);
       event.target.value = "";
+      filePickerModeRef.current = "journal";
       focusConsoleInput();
     }
+  }
+
+  async function handleCapturePreSessionScreenshot() {
+    try {
+      const file = await captureDisplayFrame(`${sessionId}-pre-retry`);
+      queuePreSessionScreenshot(sessionId, file);
+      syncPreSessionScreenshotState();
+      await uploadPreSessionScreenshot(file, { reason: "capture-retry" });
+    } catch (captureError) {
+      if (
+        captureError.code === "UNAVAILABLE" ||
+        captureError.name === "NotAllowedError" ||
+        captureError.name === "AbortError" ||
+        captureError.name === "NotFoundError"
+      ) {
+        filePickerModeRef.current = "pre";
+        filePickerRef.current?.click();
+        markPreSessionScreenshotFailed(
+          sessionId,
+          "Screen capture was unavailable or denied. Choose a file to retry the opening screenshot.",
+        );
+        syncPreSessionScreenshotState();
+      } else {
+        markPreSessionScreenshotFailed(sessionId, captureError.message);
+        syncPreSessionScreenshotState();
+      }
+    }
+  }
+
+  async function handleRetryQueuedPreSessionScreenshot() {
+    const file = getPreSessionScreenshotFile(sessionId);
+    if (!file) {
+      markPreSessionScreenshotFailed(
+        sessionId,
+        "The original screenshot is no longer available in this tab. Capture or upload it again to retry.",
+      );
+      syncPreSessionScreenshotState();
+      return;
+    }
+
+    await uploadPreSessionScreenshot(file, { reason: "queued-retry" });
   }
 
   async function handleEndSession(payload, postScreenshot) {
@@ -989,6 +1137,87 @@ export function JournalPage() {
       )}
 
       {pageError ? <div className="alert error-alert">{pageError}</div> : null}
+      {preSessionScreenshotUpload &&
+      (!hasPreScreenshot || preSessionScreenshotUpload.status === "succeeded") ? (
+        <div
+          className={`alert ${
+            preSessionScreenshotUpload.status === "failed"
+              ? "warning-alert"
+              : preSessionScreenshotUpload.status === "succeeded"
+                ? "success-alert"
+                : "warning-alert"
+          }`}
+        >
+          {preSessionScreenshotUpload.status === "uploading" ? (
+            <div className="session-upload-alert">
+              <span>
+                Uploading opening screenshot{preSessionScreenshotUpload.fileName ? `: ${preSessionScreenshotUpload.fileName}` : ""}.
+              </span>
+            </div>
+          ) : null}
+          {preSessionScreenshotUpload.status === "queued" ? (
+            <div className="session-upload-alert">
+              <span>
+                Opening screenshot queued and will upload in the background after the journal opens.
+              </span>
+            </div>
+          ) : null}
+          {preSessionScreenshotUpload.status === "failed" ? (
+            <div className="session-upload-alert">
+              <span>
+                Opening screenshot upload failed. You can continue journaling and retry now or later.
+                {preSessionScreenshotUpload.error ? ` ${preSessionScreenshotUpload.error}` : ""}
+              </span>
+              <div className="session-upload-actions">
+                <Button
+                  disabled={isPreSessionScreenshotUploading}
+                  onClick={handleRetryQueuedPreSessionScreenshot}
+                  type="button"
+                  variant="secondary"
+                >
+                  Retry now
+                </Button>
+                <Button
+                  disabled={isPreSessionScreenshotUploading}
+                  onClick={handleCapturePreSessionScreenshot}
+                  type="button"
+                  variant="secondary"
+                >
+                  Capture opening screenshot
+                </Button>
+                <Button
+                  disabled={isPreSessionScreenshotUploading}
+                  onClick={() => {
+                    filePickerModeRef.current = "pre";
+                    filePickerRef.current?.click();
+                  }}
+                  type="button"
+                  variant="secondary"
+                >
+                  Upload file
+                </Button>
+              </div>
+            </div>
+          ) : null}
+          {preSessionScreenshotUpload.status === "succeeded" ? (
+            <div className="session-upload-alert">
+              <span>Opening screenshot uploaded successfully.</span>
+              <div className="session-upload-actions">
+                <Button
+                  onClick={() => {
+                    clearPreSessionScreenshotState(sessionId);
+                    setPreSessionScreenshotUpload(null);
+                  }}
+                  type="button"
+                  variant="secondary"
+                >
+                  Dismiss
+                </Button>
+              </div>
+            </div>
+          ) : null}
+        </div>
+      ) : null}
       {actionError ? <div className="alert error-alert">{actionError}</div> : null}
 
       <section

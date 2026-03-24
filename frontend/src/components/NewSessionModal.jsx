@@ -10,7 +10,13 @@ const initialState = {
   symbol: "MNQ",
 };
 
-export function NewSessionModal({ error, isSubmitting, onClose, onSubmit, suggestedSymbol = null }) {
+export function NewSessionModal({
+  error,
+  isSubmitting,
+  onClose,
+  onSubmit,
+  suggestedSymbol = null,
+}) {
   const fileInputRef = useRef(null);
   const [form, setForm] = useState({
     ...initialState,
@@ -111,6 +117,12 @@ export function NewSessionModal({ error, isSubmitting, onClose, onSubmit, sugges
           </div>
           {screenshot ? <span className="capture-status">{screenshot.name}</span> : null}
           {captureHint ? <span className="field-hint">{captureHint}</span> : null}
+          {screenshot ? (
+            <span className="field-hint">
+              The journal will open immediately after session creation. If upload is interrupted, you can retry the
+              opening screenshot from inside the session.
+            </span>
+          ) : null}
         </Field>
         {error ? <div className="alert error-alert">{error}</div> : null}
         <div className="modal-actions">
@@ -118,7 +130,7 @@ export function NewSessionModal({ error, isSubmitting, onClose, onSubmit, sugges
             Cancel
           </Button>
           <Button type="submit" disabled={isSubmitting}>
-            {isSubmitting ? "Creating..." : "Create session"}
+            {isSubmitting ? "Creating session..." : "Create session"}
           </Button>
         </div>
       </form>
