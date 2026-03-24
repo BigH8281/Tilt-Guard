@@ -18,6 +18,7 @@ function resolveApiBaseUrl() {
 }
 
 const API_BASE_URL = resolveApiBaseUrl();
+let unauthorizedHandler = null;
 
 async function request(path, options = {}) {
   const response = await fetch(`${API_BASE_URL}${path}`, options);
@@ -37,10 +38,29 @@ async function request(path, options = {}) {
 
     const error = new Error(message);
     error.status = response.status;
+    error.path = path;
+
+    const sentAuthorizationHeader =
+      typeof options.headers === "object" && options.headers !== null
+        ? "Authorization" in options.headers
+        : false;
+
+    if (response.status === 401 && sentAuthorizationHeader && typeof unauthorizedHandler === "function") {
+      unauthorizedHandler({
+        message,
+        path,
+        status: response.status,
+      });
+    }
+
     throw error;
   }
 
   return body;
+}
+
+export function setUnauthorizedHandler(handler) {
+  unauthorizedHandler = handler;
 }
 
 function authHeaders(token) {

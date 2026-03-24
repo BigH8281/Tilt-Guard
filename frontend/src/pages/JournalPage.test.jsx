@@ -210,6 +210,20 @@ describe("JournalPage close-trade recovery", () => {
     expect(screen.getByText("0 open")).toBeTruthy();
   });
 
+  it("keeps the session shell visible when one related fetch fails during refresh", async () => {
+    fetchSessionDetail.mockResolvedValue(openSession);
+    fetchPosition.mockResolvedValue({ current_open_size: 1 });
+    fetchTradeEvents.mockRejectedValue(new Error("Invalid or missing authentication credentials."));
+    fetchJournalEntries.mockResolvedValue([]);
+    fetchScreenshots.mockResolvedValue([]);
+
+    renderJournalPage();
+
+    expect(await screen.findByText("NY AM")).toBeTruthy();
+    expect(screen.getByText("Some session data could not be refreshed: trade events.")).toBeTruthy();
+    expect(screen.getByText("1 open")).toBeTruthy();
+  });
+
   it("resyncs authoritative state after end-session fails because the session closed elsewhere", async () => {
     fetchSessionDetail.mockResolvedValueOnce(openSession).mockResolvedValueOnce(closedSession);
     fetchPosition.mockResolvedValueOnce({ current_open_size: 0 }).mockResolvedValueOnce({

@@ -204,6 +204,18 @@ function createWorkflowValidationError(message) {
   return error;
 }
 
+function formatSessionRefreshError(failures) {
+  if (!failures.length) {
+    return "";
+  }
+
+  if (failures.length === 1) {
+    return `Some session data could not be refreshed: ${failures[0]}.`;
+  }
+
+  return `Some session data could not be refreshed: ${failures.join(", ")}.`;
+}
+
 export function JournalPage() {
   const navigate = useNavigate();
   const commandInputRef = useRef(null);
@@ -314,41 +326,90 @@ export function JournalPage() {
 
     if (showSpinner) {
       setIsLoading(true);
-      setPageError("");
     }
+    setPageError("");
 
     try {
-      const [sessionResponse, journalResponse, tradeResponse, positionResponse, screenshotResponse] =
-        await Promise.all([
-          fetchSessionDetail(token, sessionId),
-          fetchJournalEntries(token, sessionId),
-          fetchTradeEvents(token, sessionId),
-          fetchPosition(token, sessionId),
-          fetchScreenshots(token, sessionId),
-        ]);
-
+      const sessionResponse = await fetchSessionDetail(token, sessionId);
       setSession(sessionResponse);
-      setJournalEntries(journalResponse);
-      setTradeEvents(tradeResponse);
-      setPosition(positionResponse);
-      setScreenshots(screenshotResponse);
       setPanelMode(sessionResponse.status === "closed" ? "details" : null);
+
+      const results = await Promise.allSettled([
+        fetchJournalEntries(token, sessionId),
+        fetchTradeEvents(token, sessionId),
+        fetchPosition(token, sessionId),
+        fetchScreenshots(token, sessionId),
+      ]);
+      const [journalResult, tradeResult, positionResult, screenshotResult] = results;
+      const failures = [];
+
+      if (journalResult.status === "fulfilled") {
+        setJournalEntries(journalResult.value);
+      } else {
+        failures.push("journal entries");
+        logClientEvent("warn", "session_journal_fetch_failed", {
+          reason,
+          error: journalResult.reason?.message ?? String(journalResult.reason),
+          status: journalResult.reason?.status ?? null,
+        });
+      }
+
+      if (tradeResult.status === "fulfilled") {
+        setTradeEvents(tradeResult.value);
+      } else {
+        failures.push("trade events");
+        logClientEvent("warn", "session_trade_fetch_failed", {
+          reason,
+          error: tradeResult.reason?.message ?? String(tradeResult.reason),
+          status: tradeResult.reason?.status ?? null,
+        });
+      }
+
+      if (positionResult.status === "fulfilled") {
+        setPosition(positionResult.value);
+      } else {
+        failures.push("position");
+        logClientEvent("warn", "session_position_fetch_failed", {
+          reason,
+          error: positionResult.reason?.message ?? String(positionResult.reason),
+          status: positionResult.reason?.status ?? null,
+        });
+      }
+
+      if (screenshotResult.status === "fulfilled") {
+        setScreenshots(screenshotResult.value);
+      } else {
+        failures.push("screenshots");
+        logClientEvent("warn", "session_screenshot_fetch_failed", {
+          reason,
+          error: screenshotResult.reason?.message ?? String(screenshotResult.reason),
+          status: screenshotResult.reason?.status ?? null,
+        });
+      }
+
+      const refreshError = formatSessionRefreshError(failures);
+      if (refreshError) {
+        setPageError(refreshError);
+      }
 
       logClientEvent("info", "session_state_sync_completed", {
         reason,
         syncedSessionStatus: sessionResponse.status,
-        syncedOpenSize: positionResponse.current_open_size,
-        syncedTradeCount: tradeResponse.length,
-        syncedJournalCount: journalResponse.length,
-        syncedScreenshotCount: screenshotResponse.length,
+        syncedOpenSize:
+          positionResult.status === "fulfilled" ? positionResult.value.current_open_size : null,
+        syncedTradeCount: tradeResult.status === "fulfilled" ? tradeResult.value.length : null,
+        syncedJournalCount: journalResult.status === "fulfilled" ? journalResult.value.length : null,
+        syncedScreenshotCount:
+          screenshotResult.status === "fulfilled" ? screenshotResult.value.length : null,
+        partialFailureCount: failures.length,
       });
 
       return {
         sessionResponse,
-        journalResponse,
-        tradeResponse,
-        positionResponse,
-        screenshotResponse,
+        journalResponse: journalResult.status === "fulfilled" ? journalResult.value : null,
+        tradeResponse: tradeResult.status === "fulfilled" ? tradeResult.value : null,
+        positionResponse: positionResult.status === "fulfilled" ? positionResult.value : null,
+        screenshotResponse: screenshotResult.status === "fulfilled" ? screenshotResult.value : null,
       };
     } catch (loadError) {
       logClientEvent("warn", "session_state_sync_failed", {

@@ -35,6 +35,26 @@ function displaySessionField(value) {
   return value === "pending" ? "Setup pending" : value;
 }
 
+function logDashboardEvent(level, event, details = {}) {
+  const logger = console[level] ?? console.info;
+  logger("[DashboardPage]", {
+    event,
+    ...details,
+  });
+}
+
+function formatDashboardErrors(errors) {
+  if (!errors.length) {
+    return "";
+  }
+
+  if (errors.length === 1) {
+    return errors[0];
+  }
+
+  return `Some dashboard data could not be refreshed. ${errors.join(" ")}`;
+}
+
 export function DashboardPage() {
   const navigate = useNavigate();
   const { token } = useAuth();
@@ -52,41 +72,97 @@ export function DashboardPage() {
   async function loadDashboard() {
     setIsLoading(true);
     setError("");
+    logDashboardEvent("info", "dashboard_load_started");
+
+    const errors = [];
+    let currentOpenSession = null;
 
     try {
-      const [currentOpenSession, sessions] = await Promise.all([
-        fetchOpenSession(token),
-        fetchSessions(token),
-      ]);
-
+      currentOpenSession = await fetchOpenSession(token);
       setOpenSession(currentOpenSession);
+      logDashboardEvent("info", "open_session_loaded", {
+        hasOpenSession: Boolean(currentOpenSession),
+        sessionId: currentOpenSession?.id ?? null,
+      });
+    } catch (loadError) {
+      errors.push(`Open session: ${loadError.message}`);
+      logDashboardEvent("warn", "open_session_load_failed", {
+        message: loadError.message,
+        status: loadError.status ?? null,
+      });
+    }
 
+    try {
+      const sessions = await fetchSessions(token);
       const closedSessions = sessions.filter((session) => session.status === "closed");
-      const rows = await Promise.all(
+      const rowResults = await Promise.all(
         closedSessions.map(async (session) => {
-          const trades = await fetchTradeEvents(token, session.id);
-          return buildRow(session, trades);
+          try {
+            const trades = await fetchTradeEvents(token, session.id);
+            return buildRow(session, trades);
+          } catch (tradeError) {
+            errors.push(`Closed session #${session.id} trades: ${tradeError.message}`);
+            logDashboardEvent("warn", "historical_trade_fetch_failed", {
+              sessionId: session.id,
+              message: tradeError.message,
+              status: tradeError.status ?? null,
+            });
+            return buildRow(session, []);
+          }
         }),
       );
 
-      setHistoricalSessions(rows);
-
-      if (currentOpenSession) {
-        const [position, trades] = await Promise.all([
-          fetchPosition(token, currentOpenSession.id),
-          fetchTradeEvents(token, currentOpenSession.id),
-        ]);
-        setOpenSessionPosition(position.current_open_size);
-        setOpenSessionTradeCount(trades.length);
-      } else {
-        setOpenSessionPosition(0);
-        setOpenSessionTradeCount(0);
-      }
+      setHistoricalSessions(rowResults);
+      logDashboardEvent("info", "historical_sessions_loaded", {
+        closedSessionCount: closedSessions.length,
+      });
     } catch (loadError) {
-      setError(loadError.message);
-    } finally {
-      setIsLoading(false);
+      errors.push(`Session history: ${loadError.message}`);
+      logDashboardEvent("warn", "session_history_load_failed", {
+        message: loadError.message,
+        status: loadError.status ?? null,
+      });
     }
+
+    if (currentOpenSession) {
+      try {
+        const position = await fetchPosition(token, currentOpenSession.id);
+        setOpenSessionPosition(position.current_open_size);
+      } catch (loadError) {
+        errors.push(`Open session position: ${loadError.message}`);
+        logDashboardEvent("warn", "open_session_position_load_failed", {
+          sessionId: currentOpenSession.id,
+          message: loadError.message,
+          status: loadError.status ?? null,
+        });
+      }
+
+      try {
+        const trades = await fetchTradeEvents(token, currentOpenSession.id);
+        setOpenSessionTradeCount(trades.length);
+      } catch (loadError) {
+        errors.push(`Open session trades: ${loadError.message}`);
+        logDashboardEvent("warn", "open_session_trade_load_failed", {
+          sessionId: currentOpenSession.id,
+          message: loadError.message,
+          status: loadError.status ?? null,
+        });
+      }
+    } else {
+      setOpenSessionPosition(0);
+      setOpenSessionTradeCount(0);
+    }
+
+    const nextError = formatDashboardErrors(errors);
+    if (nextError) {
+      logDashboardEvent("warn", "dashboard_load_completed_with_errors", {
+        errorCount: errors.length,
+      });
+    } else {
+      logDashboardEvent("info", "dashboard_load_completed");
+    }
+    setError(nextError);
+    setIsLoading(false);
   }
 
   useEffect(() => {
@@ -108,6 +184,10 @@ export function DashboardPage() {
       navigate(`/sessions/${session.id}`);
     } catch (submissionError) {
       setModalError(submissionError.message);
+      logDashboardEvent("warn", "session_create_failed", {
+        message: submissionError.message,
+        status: submissionError.status ?? null,
+      });
     } finally {
       setIsSubmitting(false);
     }

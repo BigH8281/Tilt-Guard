@@ -10,7 +10,7 @@ import { ExtensionConnectPage } from "./pages/ExtensionConnectPage";
 import { JournalPage } from "./pages/JournalPage";
 
 function ProtectedRoute({ children }) {
-  const { isAuthenticated, isBootstrapping } = useAuth();
+  const { authFailureReason, isAuthenticated, isBootstrapping } = useAuth();
   const location = useLocation();
 
   if (isBootstrapping) {
@@ -19,7 +19,8 @@ function ProtectedRoute({ children }) {
 
   if (!isAuthenticated) {
     const next = `${location.pathname}${location.search}${location.hash}`;
-    return <Navigate to={`/auth?next=${encodeURIComponent(next)}`} replace />;
+    const reason = authFailureReason ? "&reason=expired" : "";
+    return <Navigate to={`/auth?next=${encodeURIComponent(next)}${reason}`} replace />;
   }
 
   return children;

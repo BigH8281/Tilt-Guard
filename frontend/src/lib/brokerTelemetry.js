@@ -4,6 +4,14 @@ import { fetchLatestBrokerTelemetry } from "./api";
 
 const AUTO_REFRESH_MS = 15000;
 
+function logTelemetryEvent(level, event, details = {}) {
+  const logger = console[level] ?? console.info;
+  logger("[BrokerTelemetry]", {
+    event,
+    ...details,
+  });
+}
+
 export function useLatestBrokerTelemetry(token) {
   const [telemetry, setTelemetry] = useState(null);
   const [error, setError] = useState("");
@@ -38,10 +46,20 @@ export function useLatestBrokerTelemetry(token) {
           setTelemetry(latest);
           setError("");
         }
+        logTelemetryEvent("info", "telemetry_load_succeeded", {
+          mode,
+          hasTelemetry: Boolean(latest),
+          status: latest?.status ?? null,
+        });
       } catch (loadError) {
         if (!cancelled) {
           setError(loadError.message);
         }
+        logTelemetryEvent("warn", "telemetry_load_failed", {
+          mode,
+          message: loadError.message,
+          status: loadError.status ?? null,
+        });
       } finally {
         if (!cancelled) {
           setIsLoading(false);
@@ -71,8 +89,16 @@ export function useLatestBrokerTelemetry(token) {
       const latest = await fetchLatestBrokerTelemetry(token);
       setTelemetry(latest);
       setError("");
+      logTelemetryEvent("info", "telemetry_refresh_succeeded", {
+        hasTelemetry: Boolean(latest),
+        status: latest?.status ?? null,
+      });
     } catch (loadError) {
       setError(loadError.message);
+      logTelemetryEvent("warn", "telemetry_refresh_failed", {
+        message: loadError.message,
+        status: loadError.status ?? null,
+      });
     } finally {
       setIsLoading(false);
       setIsRefreshing(false);

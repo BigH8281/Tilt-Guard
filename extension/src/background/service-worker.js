@@ -124,6 +124,17 @@ async function flushQueue(trigger = "unknown") {
       [STORAGE_KEYS.lastFlushStatusCode]: response.status,
       [STORAGE_KEYS.lastError]: errorMessage,
     });
+    if (response.status === 401 || response.status === 403) {
+      logger.warn("telemetry_ingest_auth_failed", {
+        status: response.status,
+        trigger,
+      });
+    } else {
+      logger.warn("telemetry_ingest_failed", {
+        status: response.status,
+        trigger,
+      });
+    }
     throw new Error(`Broker telemetry ingest failed: ${response.status}`);
   }
 
@@ -264,6 +275,9 @@ chrome.runtime.onMessageExternal.addListener((message, sender, sendResponse) => 
         [STORAGE_KEYS.authUserEmail]: message.payload.userEmail || "",
         [STORAGE_KEYS.authSyncedAt]: new Date().toISOString(),
       });
+      logger.info("external_auth_sync_applied", {
+        userEmail: message.payload.userEmail || null,
+      });
 
       try {
         await flushQueue("external_auth_sync");
@@ -288,6 +302,7 @@ chrome.runtime.onMessageExternal.addListener((message, sender, sendResponse) => 
         [STORAGE_KEYS.authUserEmail]: "",
         [STORAGE_KEYS.authSyncedAt]: "",
       });
+      logger.info("external_auth_cleared");
       sendResponse({ ok: true });
     })();
     return true;

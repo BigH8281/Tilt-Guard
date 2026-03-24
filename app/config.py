@@ -9,6 +9,7 @@ DEFAULT_DEV_CORS_ORIGINS = [
     "http://localhost:5173",
     "http://127.0.0.1:5173",
 ]
+DEFAULT_ACCESS_TOKEN_EXPIRE_MINUTES = 60
 
 
 def _normalise_database_url(raw_url: str | None) -> str:
@@ -37,13 +38,32 @@ def _default_file_storage_root() -> Path:
     return DEFAULT_FILE_STORAGE_ROOT
 
 
+def _parse_int_env(name: str, default: int) -> int:
+    raw_value = os.getenv(name)
+    if not raw_value:
+        return default
+
+    try:
+        parsed_value = int(raw_value)
+    except ValueError as exc:
+        raise RuntimeError(f"{name} must be an integer.") from exc
+
+    if parsed_value <= 0:
+        raise RuntimeError(f"{name} must be greater than zero.")
+
+    return parsed_value
+
+
 DATABASE_URL = _normalise_database_url(os.getenv("DATABASE_URL"))
 JWT_SECRET_KEY = os.getenv("JWT_SECRET_KEY")
 if not JWT_SECRET_KEY:
     raise RuntimeError("JWT_SECRET_KEY must be set.")
 
 JWT_ALGORITHM = "HS256"
-ACCESS_TOKEN_EXPIRE_MINUTES = 60
+ACCESS_TOKEN_EXPIRE_MINUTES = _parse_int_env(
+    "ACCESS_TOKEN_EXPIRE_MINUTES",
+    DEFAULT_ACCESS_TOKEN_EXPIRE_MINUTES,
+)
 
 FILE_STORAGE_ROOT = Path(os.getenv("FILE_STORAGE_ROOT", str(_default_file_storage_root()))).expanduser()
 FILE_STORAGE_URL_PATH = os.getenv("FILE_STORAGE_URL_PATH", "/uploads").strip() or "/uploads"

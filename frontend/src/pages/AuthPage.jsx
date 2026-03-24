@@ -8,7 +8,7 @@ import { useAuth } from "../context/AuthContext";
 export function AuthPage() {
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
-  const { login, register } = useAuth();
+  const { authFailureReason, clearAuthFailureReason, login, register } = useAuth();
   const [mode, setMode] = useState("login");
   const [form, setForm] = useState({
     email: "",
@@ -17,6 +17,7 @@ export function AuthPage() {
   const [error, setError] = useState("");
   const [isSubmitting, setIsSubmitting] = useState(false);
   const next = searchParams.get("next") || "/";
+  const showExpiredNotice = searchParams.get("reason") === "expired" && authFailureReason;
 
   function updateField(name, value) {
     setForm((current) => ({
@@ -37,6 +38,7 @@ export function AuthPage() {
         await register(form.email, form.password);
       }
 
+      clearAuthFailureReason();
       navigate(next, { replace: true });
     } catch (submissionError) {
       setError(submissionError.message);
@@ -91,6 +93,7 @@ export function AuthPage() {
               required
             />
           </Field>
+          {showExpiredNotice ? <div className="alert warning-alert">{authFailureReason}</div> : null}
           {error ? <div className="alert error-alert">{error}</div> : null}
           <Button disabled={isSubmitting} type="submit">
             {isSubmitting
