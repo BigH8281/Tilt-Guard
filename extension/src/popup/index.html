@@ -54,6 +54,17 @@
         color: var(--muted);
       }
 
+      .mode-toggle {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 8px;
+      }
+
+      .mode-toggle button.active {
+        background: var(--accent);
+        color: #09130d;
+      }
+
       .grid {
         display: grid;
         grid-template-columns: 1fr 1fr;
@@ -117,6 +128,20 @@
       <section>
         <h1>Tilt Guard</h1>
         <div id="summary" class="summary">Loading extension status...</div>
+      </section>
+
+      <section>
+        <h2>Mode</h2>
+        <div class="grid">
+          <div class="meta-item"><span>Current mode</span><strong id="modeValue">Loading...</strong></div>
+          <div class="meta-item"><span>Changed</span><strong id="modeChangedAtValue">Never</strong></div>
+          <div class="meta-item"><span>App URL</span><strong id="appBaseUrlValue">Loading...</strong></div>
+          <div class="meta-item"><span>API URL</span><strong id="apiBaseUrlValue">Loading...</strong></div>
+        </div>
+        <div class="mode-toggle" style="margin-top: 10px">
+          <button id="hostedModeButton" class="secondary">Hosted</button>
+          <button id="localModeButton" class="secondary">Local</button>
+        </div>
       </section>
 
       <section>

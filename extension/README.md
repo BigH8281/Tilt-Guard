@@ -1,83 +1,49 @@
 # Tilt Guard Extension
 
-This build is the TradingView-first Tilt-Guard extension slice.
+This extension now ships as a single unpacked build.
 
-It supports:
+## Mode behavior
 
-- secure app-to-extension auth sync through `/extension/connect`
-- TradingView chart detection
-- broker adapter matching for `tradingview_base`, `tradingview_fxcm`, and `tradingview_tradovate`
-- backend-owned extension session status and heartbeat
-- telemetry ingest for dashboard and journal system feeds
+- First install defaults to `HOSTED`
+- The popup includes a `Hosted` / `Local` toggle
+- Switching mode does not require a rebuild
+- The active mode controls:
+  - the `/extension/connect` URL opened by the popup
+  - the backend API base URL used by the service worker
+  - the app origin trusted for auth sync
 
 ## Load targets
 
-- Raw source local default: load [`extension/`](/home/higgo/code/Tilt-Guard/extension)
-- Generated local build: load [`extension/dist/local/`](/home/higgo/code/Tilt-Guard/extension/dist/local)
-- Generated hosted build: load [`extension/dist/hosted/`](/home/higgo/code/Tilt-Guard/extension/dist/hosted)
+- Raw source: load [`extension/`](/home/higgo/code/Tilt-Guard/extension)
+- Built unpacked folder: load [`extension/dist/unpacked/`](/home/higgo/code/Tilt-Guard/extension/dist/unpacked)
 
-Chrome still loads the extension as an unpacked folder. There is no packed build step required.
+## Build the single unpacked folder
 
-## Build mode-specific unpacked folders
-
-Local build:
+If you want the built folder to contain the real Railway defaults, run:
 
 ```bash
-python scripts/build_extension.py --mode local
+python3 scripts/build_extension.py \
+  --hosted-app-base-url https://<frontend-domain> \
+  --hosted-api-base-url https://<backend-domain>
 ```
 
-Hosted build:
+This writes the unpacked extension to `extension/dist/unpacked/`.
 
-```bash
-python scripts/build_extension.py \
-  --mode hosted \
-  --app-base-url https://<frontend-domain> \
-  --api-base-url https://<backend-domain>
-```
+If you skip the hosted URL arguments, the built folder keeps the placeholder values from
+[`extension/src/shared/extension-config.js`](/home/higgo/code/Tilt-Guard/extension/src/shared/extension-config.js).
 
 ## Auth flow
 
-1. Load the unpacked extension folder for the mode you want in `chrome://extensions`.
+1. Load the unpacked extension folder in `chrome://extensions`.
 2. Open the popup.
-3. Click `Connect App`.
-4. Sign in through the journal UI if needed.
-5. The `/extension/connect` page sends the current JWT to the extension through `chrome.runtime.sendMessage(...)`.
-6. Return to the popup to confirm:
-   - app auth is connected
-   - TradingView detection state
-   - broker adapter/profile state
-   - monitoring state
+3. Confirm the mode is `Hosted` for normal remote use.
+4. Click `Connect App`.
+5. Sign in through the web app if needed.
+6. The `/extension/connect` page syncs the current JWT into extension storage.
+7. Return to the popup to confirm the connection and monitoring state.
 
-No token copy/paste is required.
+## Switching modes
 
-## Local verification
-
-1. Start the local stack.
-2. Load either [`extension/`](/home/higgo/code/Tilt-Guard/extension) or [`extension/dist/local/`](/home/higgo/code/Tilt-Guard/extension/dist/local).
-3. Click `Connect Journal` and sign in locally.
-4. Open a live TradingView chart.
-5. Confirm the popup shows TradingView detection.
-6. Use `Flush Telemetry` in the popup or wait for the background alarm.
-
-## Hosted verification
-
-1. Build the hosted unpacked folder with the real frontend/backend URLs.
-2. Load [`extension/dist/hosted/`](/home/higgo/code/Tilt-Guard/extension/dist/hosted).
-3. Click `Connect App` and sign in against the hosted journal.
-4. Confirm the popup shows the hosted API/journal URLs and `Auth: Connected`.
-
-## Move to another PC
-
-1. Build the correct unpacked folder locally:
-
-```bash
-python scripts/build_extension.py --mode hosted --app-base-url https://<frontend-domain> --api-base-url https://<backend-domain>
-```
-
-2. Copy the entire output folder, usually `extension/dist/hosted/`, to the other PC.
-3. On the other PC, open `chrome://extensions`.
-4. Enable `Developer mode`.
-5. Click `Load unpacked`.
-6. Select the copied output folder.
-7. Open the popup and click `Connect App`.
-8. Sign in to Tilt-Guard and open a TradingView chart to verify monitoring.
+- `Hosted` uses the hosted frontend/backend pair.
+- `Local` uses `http://127.0.0.1:5173` and `http://127.0.0.1:8000`.
+- Changing mode clears auth/session state and queued telemetry so environments do not mix.

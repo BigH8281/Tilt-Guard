@@ -1,9 +1,18 @@
-import { EXTENSION_CONFIG } from "./extension-config.js";
+import {
+  EXTENSION_CONFIG,
+  EXTENSION_MODES,
+  getConfiguredModeConfig,
+  getModeConfig,
+  normaliseBaseUrl,
+  normaliseMode,
+} from "./extension-config.js";
 
 export const STORAGE_KEYS = {
   mode: "mode",
   apiBaseUrl: "apiBaseUrl",
   appBaseUrl: "appBaseUrl",
+  modeConfigVersion: "modeConfigVersion",
+  modeChangedAt: "modeChangedAt",
   authToken: "authToken",
   authUserEmail: "authUserEmail",
   authSyncedAt: "authSyncedAt",
@@ -31,10 +40,17 @@ export const STORAGE_KEYS = {
   lastError: "lastError",
 };
 
+export const MODE_CONFIG_VERSION = 2;
+
+const LEGACY_LOCAL_DEFAULTS = getModeConfig(EXTENSION_MODES.LOCAL);
+const DEFAULT_MODE_SETTINGS = getConfiguredModeConfig(EXTENSION_CONFIG.defaultMode);
+
 export const DEFAULT_SETTINGS = {
-  mode: EXTENSION_CONFIG.mode,
-  apiBaseUrl: EXTENSION_CONFIG.apiBaseUrl,
-  appBaseUrl: EXTENSION_CONFIG.appBaseUrl,
+  mode: DEFAULT_MODE_SETTINGS.mode,
+  apiBaseUrl: DEFAULT_MODE_SETTINGS.apiBaseUrl,
+  appBaseUrl: DEFAULT_MODE_SETTINGS.appBaseUrl,
+  modeConfigVersion: MODE_CONFIG_VERSION,
+  modeChangedAt: "",
   authToken: "",
   authUserEmail: "",
   authSyncedAt: "",
@@ -60,11 +76,87 @@ export async function setStorage(values) {
   await chrome.storage.local.set(values);
 }
 
+export function getModeStoragePatch(mode, { changedAt = "" } = {}) {
+  const config = getConfiguredModeConfig(mode);
+  return {
+    [STORAGE_KEYS.mode]: config.mode,
+    [STORAGE_KEYS.apiBaseUrl]: config.apiBaseUrl,
+    [STORAGE_KEYS.appBaseUrl]: config.appBaseUrl,
+    [STORAGE_KEYS.modeConfigVersion]: MODE_CONFIG_VERSION,
+    [STORAGE_KEYS.modeChangedAt]: changedAt,
+  };
+}
+
+function normaliseStoredMode(value) {
+  return typeof value === "string" && value.trim() ? normaliseMode(value) : "";
+}
+
+function inferModeFromUrls({ appBaseUrl, apiBaseUrl }) {
+  const normalisedAppBaseUrl = normaliseBaseUrl(appBaseUrl);
+  const normalisedApiBaseUrl = normaliseBaseUrl(apiBaseUrl);
+
+  if (
+    normalisedAppBaseUrl === normaliseBaseUrl(LEGACY_LOCAL_DEFAULTS.appBaseUrl) &&
+    normalisedApiBaseUrl === normaliseBaseUrl(LEGACY_LOCAL_DEFAULTS.apiBaseUrl)
+  ) {
+    return EXTENSION_MODES.LOCAL;
+  }
+
+  return EXTENSION_CONFIG.defaultMode;
+}
+
+export function shouldMigrateLegacyModeDefaults(stored) {
+  const storedMode = normaliseStoredMode(stored[STORAGE_KEYS.mode]);
+  if (stored[STORAGE_KEYS.modeConfigVersion] === MODE_CONFIG_VERSION) {
+    return false;
+  }
+
+  const storedAppBaseUrl = normaliseBaseUrl(stored[STORAGE_KEYS.appBaseUrl]);
+  const storedApiBaseUrl = normaliseBaseUrl(stored[STORAGE_KEYS.apiBaseUrl]);
+  const isLegacyLocalMode = storedMode === EXTENSION_MODES.LOCAL;
+  const matchesLegacyLocalDefaults =
+    storedAppBaseUrl === normaliseBaseUrl(LEGACY_LOCAL_DEFAULTS.appBaseUrl) &&
+    storedApiBaseUrl === normaliseBaseUrl(LEGACY_LOCAL_DEFAULTS.apiBaseUrl);
+  const hasExistingAuth = Boolean(stored[STORAGE_KEYS.authToken] || stored[STORAGE_KEYS.authSyncedAt]);
+
+  return isLegacyLocalMode && matchesLegacyLocalDefaults && !hasExistingAuth;
+}
+
+export function deriveModeSettings(stored) {
+  if (shouldMigrateLegacyModeDefaults(stored)) {
+    return {
+      ...DEFAULT_SETTINGS,
+      modeChangedAt: stored[STORAGE_KEYS.modeChangedAt] || "",
+    };
+  }
+
+  const storedMode = normaliseStoredMode(stored[STORAGE_KEYS.mode]);
+  const resolvedMode =
+    storedMode ||
+    inferModeFromUrls({
+      appBaseUrl: stored[STORAGE_KEYS.appBaseUrl],
+      apiBaseUrl: stored[STORAGE_KEYS.apiBaseUrl],
+    });
+  const modeDefaults = getConfiguredModeConfig(resolvedMode);
+  const storedAppBaseUrl = normaliseBaseUrl(stored[STORAGE_KEYS.appBaseUrl]);
+  const storedApiBaseUrl = normaliseBaseUrl(stored[STORAGE_KEYS.apiBaseUrl]);
+
+  return {
+    mode: modeDefaults.mode,
+    apiBaseUrl: storedApiBaseUrl || modeDefaults.apiBaseUrl,
+    appBaseUrl: storedAppBaseUrl || modeDefaults.appBaseUrl,
+    modeConfigVersion: MODE_CONFIG_VERSION,
+    modeChangedAt: stored[STORAGE_KEYS.modeChangedAt] || "",
+  };
+}
+
 export async function getSettings() {
   const stored = await getStorage([
     STORAGE_KEYS.mode,
     STORAGE_KEYS.apiBaseUrl,
     STORAGE_KEYS.appBaseUrl,
+    STORAGE_KEYS.modeConfigVersion,
+    STORAGE_KEYS.modeChangedAt,
     STORAGE_KEYS.authToken,
     STORAGE_KEYS.authUserEmail,
     STORAGE_KEYS.authSyncedAt,
@@ -81,10 +173,13 @@ export async function getSettings() {
     STORAGE_KEYS.tradingViewTabCount,
     STORAGE_KEYS.tabScanCompletedAt,
   ]);
+  const modeSettings = deriveModeSettings(stored);
   return {
-    mode: stored[STORAGE_KEYS.mode] || DEFAULT_SETTINGS.mode,
-    apiBaseUrl: stored[STORAGE_KEYS.apiBaseUrl] || DEFAULT_SETTINGS.apiBaseUrl,
-    appBaseUrl: stored[STORAGE_KEYS.appBaseUrl] || DEFAULT_SETTINGS.appBaseUrl,
+    mode: modeSettings.mode,
+    apiBaseUrl: modeSettings.apiBaseUrl,
+    appBaseUrl: modeSettings.appBaseUrl,
+    modeConfigVersion: modeSettings.modeConfigVersion,
+    modeChangedAt: modeSettings.modeChangedAt,
     authToken: stored[STORAGE_KEYS.authToken] || DEFAULT_SETTINGS.authToken,
     authUserEmail: stored[STORAGE_KEYS.authUserEmail] || DEFAULT_SETTINGS.authUserEmail,
     authSyncedAt: stored[STORAGE_KEYS.authSyncedAt] || DEFAULT_SETTINGS.authSyncedAt,

@@ -1,8 +1,21 @@
 import { TELEMETRY_STALE_AFTER_MS, deriveExtensionRuntime } from "./extension-state.js";
 import { createLogger } from "../shared/log.js";
-import { EXTENSION_CONFIG } from "../shared/extension-config.js";
+import {
+  EXTENSION_MODES,
+  getAllowedExternalOrigins,
+  getConfiguredModeConfig,
+  isAbsoluteHttpUrl,
+} from "../shared/extension-config.js";
 import { OBSERVER_CONFIG } from "../shared/selectors.js";
-import { DEFAULT_SETTINGS, STORAGE_KEYS, getSettings, getStorage, setStorage } from "../shared/storage.js";
+import {
+  DEFAULT_SETTINGS,
+  STORAGE_KEYS,
+  deriveModeSettings,
+  getModeStoragePatch,
+  getSettings,
+  getStorage,
+  setStorage,
+} from "../shared/storage.js";
 
 const logger = createLogger("background");
 const FLUSH_ALARM = "telemetry-flush";
@@ -50,18 +63,46 @@ function normaliseOrigin(value) {
   }
 }
 
-function getAllowedExternalOrigins() {
-  return new Set(
-    [DEFAULT_SETTINGS.appBaseUrl, ...(EXTENSION_CONFIG.allowedExternalOrigins || [])]
+async function isTrustedExternalSender(sender) {
+  const settings = await getSettings();
+  const allowedOrigins = new Set(
+    getAllowedExternalOrigins(settings.mode)
       .map((value) => normaliseOrigin(value))
       .filter(Boolean),
   );
-}
-
-function isTrustedExternalSender(sender) {
-  const allowedOrigins = getAllowedExternalOrigins();
   const senderOrigin = normaliseOrigin(sender?.origin || sender?.url || "");
   return senderOrigin ? allowedOrigins.has(senderOrigin) : false;
+}
+
+async function ensureModeSettings() {
+  const stored = await getStorage([
+    STORAGE_KEYS.mode,
+    STORAGE_KEYS.apiBaseUrl,
+    STORAGE_KEYS.appBaseUrl,
+    STORAGE_KEYS.modeConfigVersion,
+    STORAGE_KEYS.modeChangedAt,
+    STORAGE_KEYS.authToken,
+    STORAGE_KEYS.authSyncedAt,
+  ]);
+  const resolvedModeSettings = deriveModeSettings(stored);
+  const needsPatch =
+    stored[STORAGE_KEYS.mode] !== resolvedModeSettings.mode ||
+    stored[STORAGE_KEYS.apiBaseUrl] !== resolvedModeSettings.apiBaseUrl ||
+    stored[STORAGE_KEYS.appBaseUrl] !== resolvedModeSettings.appBaseUrl ||
+    stored[STORAGE_KEYS.modeConfigVersion] !== resolvedModeSettings.modeConfigVersion ||
+    stored[STORAGE_KEYS.modeChangedAt] !== resolvedModeSettings.modeChangedAt;
+
+  if (needsPatch) {
+    await setStorage({
+      [STORAGE_KEYS.mode]: resolvedModeSettings.mode,
+      [STORAGE_KEYS.apiBaseUrl]: resolvedModeSettings.apiBaseUrl,
+      [STORAGE_KEYS.appBaseUrl]: resolvedModeSettings.appBaseUrl,
+      [STORAGE_KEYS.modeConfigVersion]: resolvedModeSettings.modeConfigVersion,
+      [STORAGE_KEYS.modeChangedAt]: resolvedModeSettings.modeChangedAt,
+    });
+  }
+
+  return resolvedModeSettings;
 }
 
 async function ensureAlarms() {
@@ -210,6 +251,9 @@ async function syncExtensionSession(trigger = "manual") {
   if (!stateContext.settings.authToken) {
     return { ok: false, skipped: true, reason: "missing_auth_token" };
   }
+  if (!isAbsoluteHttpUrl(stateContext.settings.apiBaseUrl)) {
+    return { ok: false, skipped: true, reason: "missing_api_config" };
+  }
 
   const endpoint = stateContext.state[STORAGE_KEYS.extensionSessionKey] ? "heartbeat" : "connect";
   const url = buildExtensionSessionUrl(stateContext.settings.apiBaseUrl, endpoint);
@@ -257,7 +301,7 @@ async function syncExtensionSession(trigger = "manual") {
 
 async function disconnectExtensionSession() {
   const settings = await getSettings();
-  if (!settings.authToken) {
+  if (!settings.authToken || !isAbsoluteHttpUrl(settings.apiBaseUrl)) {
     return;
   }
 
@@ -287,7 +331,7 @@ async function flushQueue(trigger = "unknown") {
   const ingestUrl = apiBaseUrl ? buildIngestUrl(apiBaseUrl) : null;
   const batch = queue.slice(0, OBSERVER_CONFIG.maxBatchSize);
 
-  if (!apiBaseUrl || !authToken) {
+  if (!isAbsoluteHttpUrl(apiBaseUrl) || !authToken) {
     const reason = "missing_api_config";
     logger.warn("flush_skipped", { reason, queued: queue.length });
     await setFlushState({
@@ -358,6 +402,7 @@ async function flushQueue(trigger = "unknown") {
 }
 
 async function refreshRuntimeState(trigger = "runtime_refresh", { syncSession = true } = {}) {
+  await ensureModeSettings();
   await scanTradingViewTabs();
   const runtimeState = await deriveAndPersistRuntimeState();
   if (syncSession) {
@@ -378,17 +423,65 @@ async function clearAuthState() {
   await refreshRuntimeState("auth_cleared", { syncSession: false });
 }
 
-chrome.runtime.onInstalled.addListener(async () => {
+async function switchMode(nextMode) {
+  const previousSettings = await getSettings();
+  const resolvedMode = nextMode === EXTENSION_MODES.LOCAL ? EXTENSION_MODES.LOCAL : EXTENSION_MODES.HOSTED;
+  if (previousSettings.mode === resolvedMode) {
+    return { changed: false, settings: previousSettings };
+  }
+
+  const nextSettings = getConfiguredModeConfig(resolvedMode);
+  await disconnectExtensionSession();
   await setStorage({
-    [STORAGE_KEYS.mode]: DEFAULT_SETTINGS.mode,
-    [STORAGE_KEYS.apiBaseUrl]: DEFAULT_SETTINGS.apiBaseUrl,
-    [STORAGE_KEYS.appBaseUrl]: DEFAULT_SETTINGS.appBaseUrl,
+    ...getModeStoragePatch(resolvedMode, { changedAt: new Date().toISOString() }),
+    [STORAGE_KEYS.authToken]: "",
+    [STORAGE_KEYS.authUserEmail]: "",
+    [STORAGE_KEYS.authSyncedAt]: "",
+    [STORAGE_KEYS.extensionSessionKey]: "",
+    [STORAGE_KEYS.extensionSessionStatus]: "",
+    [STORAGE_KEYS.telemetryQueue]: [],
+    [STORAGE_KEYS.lastKnownStatus]: null,
+    [STORAGE_KEYS.lastAttemptAt]: "",
+    [STORAGE_KEYS.lastSuccessAt]: "",
+    [STORAGE_KEYS.lastAttemptUrl]: "",
+    [STORAGE_KEYS.lastFlushOutcome]: "",
+    [STORAGE_KEYS.lastFlushStatusCode]: "",
+    [STORAGE_KEYS.lastFlushTrigger]: "",
+    [STORAGE_KEYS.lastFlushBatchSize]: "",
+    [STORAGE_KEYS.lastError]: "",
+    [STORAGE_KEYS.currentWarning]: "",
+    [STORAGE_KEYS.extensionState]: "signed_out",
+    [STORAGE_KEYS.monitoringState]: "inactive",
+    [STORAGE_KEYS.detectedBrokerAdapter]: DEFAULT_SETTINGS.detectedBrokerAdapter,
+    [STORAGE_KEYS.detectedBrokerProfile]: DEFAULT_SETTINGS.detectedBrokerProfile,
+    [STORAGE_KEYS.detectedAdapterConfidence]: DEFAULT_SETTINGS.detectedAdapterConfidence,
+    [STORAGE_KEYS.detectedAdapterReliability]: DEFAULT_SETTINGS.detectedAdapterReliability,
+    [STORAGE_KEYS.tradingViewDetectedAt]: "",
   });
+  await refreshRuntimeState("mode_switched", { syncSession: false });
+  return {
+    changed: true,
+    settings: {
+      ...previousSettings,
+      ...nextSettings,
+      mode: resolvedMode,
+      authToken: "",
+      authUserEmail: "",
+      authSyncedAt: "",
+      extensionSessionKey: "",
+      extensionSessionStatus: "",
+    },
+  };
+}
+
+chrome.runtime.onInstalled.addListener(async () => {
+  await ensureModeSettings();
   await ensureAlarms();
   await refreshRuntimeState("installed");
 });
 
 chrome.runtime.onStartup.addListener(async () => {
+  await ensureModeSettings();
   await ensureAlarms();
   await refreshRuntimeState("startup");
 });
@@ -467,6 +560,18 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     return true;
   }
 
+  if (message?.type === "extension:set-mode") {
+    void (async () => {
+      try {
+        const result = await switchMode(message.mode);
+        sendResponse({ ok: true, changed: result.changed, settings: await getSettings() });
+      } catch (error) {
+        sendResponse({ ok: false, error: String(error) });
+      }
+    })();
+    return true;
+  }
+
   if (message?.type === "telemetry:flush-now") {
     void (async () => {
       try {
@@ -493,7 +598,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
 chrome.runtime.onMessageExternal.addListener((message, sender, sendResponse) => {
   if (message?.type === "tiltguard:auth-sync") {
     void (async () => {
-      if (!isTrustedExternalSender(sender)) {
+      if (!(await isTrustedExternalSender(sender))) {
         logger.warn("external_auth_sync_rejected", { sender: sender?.url || sender?.origin || null });
         sendResponse({ ok: false, error: "untrusted_sender" });
         return;
@@ -519,7 +624,7 @@ chrome.runtime.onMessageExternal.addListener((message, sender, sendResponse) => 
 
   if (message?.type === "tiltguard:auth-clear") {
     void (async () => {
-      if (!isTrustedExternalSender(sender)) {
+      if (!(await isTrustedExternalSender(sender))) {
         sendResponse({ ok: false, error: "untrusted_sender" });
         return;
       }

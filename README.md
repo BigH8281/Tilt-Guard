@@ -228,30 +228,36 @@ Notes:
 
 ## Extension Modes And Auth Sync
 
-The Chrome extension now supports explicit `LOCAL` and `HOSTED` unpacked builds plus a browser-based auth handshake.
+The Chrome extension now ships as a single unpacked extension with a browser-based auth handshake.
 
-Build the unpacked extension folder you want to load:
+Default behavior:
+- first install defaults to `HOSTED`
+- the popup includes a `Hosted` / `Local` toggle
+- switching mode does not require a rebuild
+- switching mode clears auth/session state so local and hosted environments do not mix
+- the hosted default currently uses `https://web-production-91bf.up.railway.app` for both the hosted connect page and API base URL
+- the backend now serves `/extension/connect` directly so the extension can connect against the live Railway origin without a separate frontend route
+
+For this release:
+- no Alembic migration is required because there are no schema changes
+- deploy the backend code before treating the extension as user-ready, because `/extension/connect` must be live on Railway first
 
 ```bash
-python scripts/build_extension.py --mode local
+python3 scripts/build_extension.py \
+  --hosted-app-base-url https://web-production-91bf.up.railway.app \
+  --hosted-api-base-url https://web-production-91bf.up.railway.app
 ```
 
-```bash
-python scripts/build_extension.py \
-  --mode hosted \
-  --app-base-url https://<frontend-domain> \
-  --api-base-url https://<backend-domain>
-```
-
-Load one of these folders in `chrome://extensions`:
-- [`extension/`](/home/higgo/code/Tilt-Guard/extension) for the source local-default version
-- [`extension/dist/local/`](/home/higgo/code/Tilt-Guard/extension/dist/local) for the generated local mode
-- [`extension/dist/hosted/`](/home/higgo/code/Tilt-Guard/extension/dist/hosted) for the generated hosted mode
+Build output for remote users:
+- only distribute [`extension/dist/unpacked/`](/home/higgo/code/Tilt-Guard/extension/dist/unpacked)
+- do not send old `extension/dist/hosted/` or `extension/dist/local/` artifacts
+- do not send the raw [`extension/`](/home/higgo/code/Tilt-Guard/extension) source folder to non-technical users
 
 To authenticate the extension:
 - open the popup
-- click `Connect Journal`
-- sign in through the journal UI if needed
+- confirm the popup mode is `Hosted` for remote use or `Local` for localhost testing
+- click `Connect App`
+- sign in on the Railway-hosted connect page if needed
 - let the `/extension/connect` page sync the current JWT into extension storage
 
 This replaces the manual token copy/paste flow for normal use.
