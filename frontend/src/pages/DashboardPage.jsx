@@ -7,7 +7,7 @@ import { LiveTradingStatus } from "../components/LiveTradingStatus";
 import { LoadingView } from "../components/LoadingView";
 import { NewSessionModal } from "../components/NewSessionModal";
 import { useAuth } from "../context/AuthContext";
-import { useLatestBrokerTelemetry } from "../lib/brokerTelemetry";
+import { getLiveSymbol, useExtensionSessionStatus, useLatestBrokerTelemetry } from "../lib/brokerTelemetry";
 import {
   createSession,
   fetchOpenSession,
@@ -59,6 +59,7 @@ export function DashboardPage() {
   const navigate = useNavigate();
   const { token } = useAuth();
   const liveTelemetry = useLatestBrokerTelemetry(token);
+  const extensionSession = useExtensionSessionStatus(token);
   const [openSession, setOpenSession] = useState(null);
   const [openSessionPosition, setOpenSessionPosition] = useState(0);
   const [openSessionTradeCount, setOpenSessionTradeCount] = useState(0);
@@ -226,7 +227,7 @@ export function DashboardPage() {
           <div className="status-block">
             <span className="status-pill open">Open</span>
             <strong>{openSession.session_name}</strong>
-            <span>{openSession.symbol}</span>
+            <span>{getLiveSymbol(extensionSession.session, liveTelemetry.telemetry, openSession.symbol)}</span>
             <span>Session #{openSession.id}</span>
             <span>{formatDateTime(openSession.started_at)}</span>
           </div>
@@ -247,12 +248,15 @@ export function DashboardPage() {
       ) : null}
 
       <LiveTradingStatus
-        error={liveTelemetry.error}
-        isLoading={liveTelemetry.isLoading}
-        isRefreshing={liveTelemetry.isRefreshing}
-        onRefresh={liveTelemetry.refresh}
+        error={extensionSession.error || liveTelemetry.error}
+        extensionSession={extensionSession.session}
+        isLoading={liveTelemetry.isLoading || extensionSession.isLoading}
+        isRefreshing={liveTelemetry.isRefreshing || extensionSession.isRefreshing}
+        onRefresh={async () => {
+          await Promise.all([liveTelemetry.refresh(), extensionSession.refresh()]);
+        }}
         telemetry={liveTelemetry.telemetry}
-        title="Live Trading Status"
+        title="Extension & Live Trading Status"
       />
 
       {error ? <div className="alert error-alert">{error}</div> : null}

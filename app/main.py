@@ -10,6 +10,7 @@ from app.config import CORS_ALLOWED_ORIGINS, FILE_STORAGE_URL_PATH
 from app.db import engine
 from app.routers.auth import router as auth_router
 from app.routers.broker_telemetry import router as broker_telemetry_router
+from app.routers.extension_sessions import router as extension_sessions_router
 from app.routers.health import router as health_router
 from app.routers.sessions import router as sessions_router
 from app.storage import FILE_STORAGE_ROOT, ensure_storage_root
@@ -47,5 +48,6 @@ app.add_middleware(
 app.include_router(health_router)
 app.include_router(auth_router)
 app.include_router(broker_telemetry_router)
+app.include_router(extension_sessions_router)
 app.include_router(sessions_router)
 app.mount(FILE_STORAGE_URL_PATH, StaticFiles(directory=FILE_STORAGE_ROOT), name="uploads")

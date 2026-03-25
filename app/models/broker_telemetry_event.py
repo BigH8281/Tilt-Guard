@@ -19,7 +19,7 @@ class BrokerTelemetryEvent(Base):
     event_type: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
     source: Mapped[str] = mapped_column(String(32), nullable=False, default="extension")
     platform: Mapped[str] = mapped_column(String(32), nullable=False, default="tradingview")
-    broker_adapter: Mapped[str] = mapped_column(String(32), nullable=False, default="fxcm")
+    broker_adapter: Mapped[str] = mapped_column(String(32), nullable=False, default="tradingview_base")
     observation_key: Mapped[str] = mapped_column(String(255), nullable=False, index=True)
     page_url: Mapped[str] = mapped_column(Text, nullable=False)
     page_title: Mapped[str] = mapped_column(Text, nullable=False)

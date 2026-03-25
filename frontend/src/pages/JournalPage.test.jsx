@@ -33,17 +33,48 @@ vi.mock("../context/AuthContext", () => ({
 
 vi.mock("../lib/brokerTelemetry", () => ({
   formatTelemetryFreshness: () => "Updated just now",
-  getTelemetryStatusCopy: () => ({
-    label: "Offline",
-    description: "No recent telemetry",
-    tone: "offline",
+  getUnifiedMonitoringStatusCopy: () => ({
+    label: "Stale",
+    description: "Observation is stale",
+    tone: "attention",
   }),
+  getLiveSymbol: () => "NAS100",
+  getLiveBrokerLabel: () => "FXCM Live",
+  getLiveAccountName: () => "Primary USD",
   useLatestBrokerTelemetry: () => ({
-    telemetry: null,
+    telemetry: {
+      symbol: "NAS100",
+      snapshot: {
+        broker: { broker_label: "FXCM Live", current_account_name: "Primary USD" },
+      },
+    },
     error: "",
     isLoading: false,
     isRefreshing: false,
     refresh: vi.fn(),
+  }),
+  useExtensionSessionStatus: () => ({
+    session: {
+      status: "live",
+      monitoring_state: "stale",
+      status_payload: { symbol: "NAS100", account_name: "Primary USD" },
+    },
+    error: "",
+    isLoading: false,
+    isRefreshing: false,
+    refresh: vi.fn(),
+  }),
+  useBrokerSystemFeed: () => ({
+    events: [
+      {
+        id: 1,
+        level: "info",
+        message: "TradingView snapshot refreshed for NAS100.",
+        occurred_at: "2026-03-23T09:15:00Z",
+      },
+    ],
+    error: "",
+    isLoading: false,
   }),
 }));
 

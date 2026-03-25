@@ -229,6 +229,22 @@ export async function fetchLatestBrokerTelemetry(token) {
   return response.telemetry;
 }
 
+export async function fetchBrokerSystemFeed(token, limit = 20) {
+  const response = await request(`/broker-telemetry/system-feed?limit=${limit}`, {
+    headers: authHeaders(token),
+  });
+
+  return response.events;
+}
+
+export async function fetchExtensionSessionStatus(token) {
+  const response = await request("/extension-sessions/status", {
+    headers: authHeaders(token),
+  });
+
+  return response.session;
+}
+
 export function endSession(token, sessionId, payload) {
   return request(`/sessions/${sessionId}/end`, {
     method: "POST",

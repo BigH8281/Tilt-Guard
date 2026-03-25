@@ -8,7 +8,7 @@
   }
 
   const observer = createTradingViewObserver({
-    onEvents(events, snapshot) {
+    onEvents(events, snapshot, adapter) {
       void (async () => {
         try {
           await chrome.runtime.sendMessage({
@@ -16,6 +16,7 @@
             payload: {
               events,
               snapshot,
+              adapter,
               pageUrl: window.location.href,
               pageTitle: document.title,
             },

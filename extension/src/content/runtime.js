@@ -40,6 +40,7 @@
   const OBSERVER_CONFIG = {
     debounceMs: 750,
     heartbeatMs: 2000,
+    snapshotRefreshMs: 15000,
     observationGapMs: 10000,
     footerSearchDepth: 5,
   };
@@ -54,6 +55,7 @@
     ORDER_ENTRY_CONTROL_VISIBLE: "order_entry_control_visible",
     PANEL_OPEN_CONTROL_VISIBLE: "panel_open_control_visible",
     PANEL_MAXIMIZE_CONTROL_VISIBLE: "panel_maximize_control_visible",
+    SNAPSHOT_REFRESHED: "snapshot_refreshed",
     OBSERVATION_GAP: "observation_gap",
   };
 
@@ -94,7 +96,7 @@
     };
   }
 
-  function buildObservationKey({ pageUrl, brokerAdapter = "fxcm", tabId = "unknown" }) {
+  function buildObservationKey({ pageUrl, brokerAdapter = "tradingview_base", tabId = "unknown" }) {
     return `${brokerAdapter}:${tabId}:${pageUrl}`;
   }
 
@@ -104,7 +106,7 @@
     details = null,
     pageTitle,
     pageUrl,
-    brokerAdapter = "fxcm",
+    brokerAdapter = "tradingview_base",
     tabId = null,
   }) {
     return {

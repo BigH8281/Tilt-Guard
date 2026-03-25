@@ -8,10 +8,11 @@ export const TELEMETRY_EVENT_TYPES = {
   ORDER_ENTRY_CONTROL_VISIBLE: "order_entry_control_visible",
   PANEL_OPEN_CONTROL_VISIBLE: "panel_open_control_visible",
   PANEL_MAXIMIZE_CONTROL_VISIBLE: "panel_maximize_control_visible",
+  SNAPSHOT_REFRESHED: "snapshot_refreshed",
   OBSERVATION_GAP: "observation_gap",
 };
 
-export function buildObservationKey({ pageUrl, brokerAdapter = "fxcm", tabId = "unknown" }) {
+export function buildObservationKey({ pageUrl, brokerAdapter = "tradingview_base", tabId = "unknown" }) {
   return `${brokerAdapter}:${tabId}:${pageUrl}`;
 }
 
@@ -21,7 +22,7 @@ export function createEventEnvelope({
   details = null,
   pageTitle,
   pageUrl,
-  brokerAdapter = "fxcm",
+  brokerAdapter = "tradingview_base",
   tabId = null,
 }) {
   return {

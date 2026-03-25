@@ -3,9 +3,13 @@
     OBSERVER_CONFIG,
     TELEMETRY_EVENT_TYPES,
     collectDomState,
+    buildSnapshotRefreshDetails,
     createEventEnvelope,
     createLogger,
+    getTradingViewPageMatch,
+    shouldEmitSnapshotRefresh,
   } = global.TiltGuardContent;
+  const { resolveAdapterMatch } = global.TiltGuardShared;
   const logger = createLogger("content-observer");
 
   function snapshotsEqual(left, right) {
@@ -14,7 +18,7 @@
     return JSON.stringify(left) === JSON.stringify(right);
   }
 
-  function buildDiffEvents(previous, current, metadata) {
+  function buildDiffEvents(previous, current, metadata, adapter) {
     const events = [];
     const previousBroker = previous?.broker || {};
     const currentBroker = current.broker || {};
@@ -27,6 +31,7 @@
           eventType: TELEMETRY_EVENT_TYPES.TRADINGVIEW_TAB_DETECTED,
           snapshot: current,
           details: { reason: "initial_observation" },
+          brokerAdapter: adapter.id,
           ...metadata,
         }),
       );
@@ -38,6 +43,7 @@
           eventType: TELEMETRY_EVENT_TYPES.TRADING_PANEL_VISIBLE,
           snapshot: current,
           details: { reason: "panel_root_detected" },
+          brokerAdapter: adapter.id,
           ...metadata,
         }),
       );
@@ -49,6 +55,7 @@
           eventType: TELEMETRY_EVENT_TYPES.BROKER_CONNECTED,
           snapshot: current,
           details: { broker_label: currentBroker.broker_label },
+          brokerAdapter: adapter.id,
           ...metadata,
         }),
       );
@@ -60,6 +67,7 @@
           eventType: TELEMETRY_EVENT_TYPES.BROKER_DISCONNECTED,
           snapshot: current,
           details: { previous_broker_label: previousBroker.broker_label },
+          brokerAdapter: adapter.id,
           ...metadata,
         }),
       );
@@ -74,6 +82,7 @@
             previous_broker_label: previousBroker.broker_label || null,
             broker_label: currentBroker.broker_label,
           },
+          brokerAdapter: adapter.id,
           ...metadata,
         }),
       );
@@ -93,6 +102,7 @@
             eventType,
             snapshot: current,
             details: { control: key },
+            brokerAdapter: adapter.id,
             ...metadata,
           }),
         );
@@ -118,6 +128,8 @@
     let heartbeatTimer = null;
     let observedRoot = null;
     let lastObservedUrl = window.location.href;
+    let lastObservedTitle = document.title;
+    let lastRefreshEventAt = 0;
 
     const metadata = {
       pageTitle: document.title,
@@ -127,13 +139,18 @@
 
     function emitObservationGap(reason) {
       const currentState = collectDomState({ footerSearchDepth: OBSERVER_CONFIG.footerSearchDepth }).snapshot;
+      const adapter = resolveAdapterMatch({
+        snapshot: currentState,
+        pageContext: getTradingViewPageMatch(window.location),
+      });
       const event = createEventEnvelope({
         eventType: TELEMETRY_EVENT_TYPES.OBSERVATION_GAP,
         snapshot: currentState,
         details: { reason },
+        brokerAdapter: adapter.id,
         ...metadata,
       });
-      onEvents([event], currentState);
+      onEvents([event], currentState, adapter);
     }
 
     function refreshGapTimer() {
@@ -167,19 +184,66 @@
 
     function flushSnapshot(reason = "mutation") {
       const { snapshot, roots } = collectDomState({ footerSearchDepth: OBSERVER_CONFIG.footerSearchDepth });
+      const adapter = resolveAdapterMatch({
+        snapshot,
+        pageContext: getTradingViewPageMatch(window.location),
+      });
+      const previousPageTitle = metadata.pageTitle;
+      const previousPageUrl = metadata.pageUrl;
+      const previousSymbol = previousSnapshot?.generic?.current_symbol || null;
+      const previousTradingPanelVisible = previousSnapshot?.generic?.trading_panel_visible || false;
       metadata.pageTitle = document.title;
       metadata.pageUrl = window.location.href;
       lastObservedUrl = metadata.pageUrl;
+      lastObservedTitle = metadata.pageTitle;
+      const changedFields = getChangedSnapshotFields(previousSnapshot, snapshot);
+      const symbolChanged = previousSymbol !== (snapshot.generic?.current_symbol || null);
+      const titleChanged = previousPageTitle !== metadata.pageTitle;
+      const urlChanged = previousPageUrl !== metadata.pageUrl;
+      const tradingPanelStateChanged =
+        previousTradingPanelVisible !== Boolean(snapshot.generic?.trading_panel_visible);
+      const shouldEmitRefresh = shouldEmitSnapshotRefresh({
+        reason,
+        documentHidden: document.hidden,
+        lastRefreshEventAt,
+        refreshIntervalMs: OBSERVER_CONFIG.snapshotRefreshMs,
+        symbolChanged,
+        titleChanged,
+        urlChanged,
+        tradingPanelStateChanged,
+      });
 
-      if (previousSnapshot && snapshotsEqual(previousSnapshot, snapshot)) {
+      if (previousSnapshot && snapshotsEqual(previousSnapshot, snapshot) && !shouldEmitRefresh) {
         refreshGapTimer();
         return;
       }
 
-      const events = buildDiffEvents(previousSnapshot, snapshot, metadata);
-      const changedFields = getChangedSnapshotFields(previousSnapshot, snapshot);
+      const events = buildDiffEvents(previousSnapshot, snapshot, metadata, adapter);
       previousSnapshot = snapshot;
       refreshGapTimer();
+
+      if (shouldEmitRefresh) {
+        events.push(
+          createEventEnvelope({
+            eventType: TELEMETRY_EVENT_TYPES.SNAPSHOT_REFRESHED,
+            snapshot,
+            details: buildSnapshotRefreshDetails({
+              reason,
+              changedFields,
+              previousSymbol,
+              currentSymbol: snapshot.generic?.current_symbol || null,
+              previousPageTitle,
+              pageTitle: metadata.pageTitle,
+              previousPageUrl,
+              pageUrl: metadata.pageUrl,
+              tradingPanelStateChanged,
+            }),
+            brokerAdapter: adapter.id,
+            ...metadata,
+          }),
+        );
+        lastRefreshEventAt = Date.now();
+      }
 
       if (!events.length && reason === "manual") {
         logger.debug("snapshot_collected_without_diff", { snapshot });
@@ -194,7 +258,9 @@
             details: {
               reason: "snapshot_changed_without_specific_event",
               changed_fields: changedFields,
+              adapter_id: adapter.id,
             },
+            brokerAdapter: adapter.id,
             ...metadata,
           }),
         );
@@ -206,10 +272,12 @@
         hasFooterCluster: Boolean(roots.footerCluster),
         eventCount: events.length,
         changedFields,
+        adapterId: adapter.id,
+        adapterConfidence: adapter.confidence,
       });
 
       if (events.length) {
-        onEvents(events, snapshot);
+        onEvents(events, snapshot, adapter);
       }
     }
 
@@ -225,11 +293,21 @@
 
         if (window.location.href !== lastObservedUrl) {
           lastObservedUrl = window.location.href;
-          scheduleFlush("navigation");
+          flushSnapshot("navigation");
           return;
         }
 
-        scheduleFlush("heartbeat");
+        if (document.title !== lastObservedTitle) {
+          lastObservedTitle = document.title;
+          flushSnapshot("title");
+          return;
+        }
+
+        if (document.hidden) {
+          return;
+        }
+
+        flushSnapshot("heartbeat");
       }, OBSERVER_CONFIG.heartbeatMs);
     }
 
@@ -239,6 +317,7 @@
       window.addEventListener("popstate", () => scheduleFlush("history"));
       window.addEventListener("hashchange", () => scheduleFlush("history"));
       window.addEventListener("focus", () => scheduleFlush("focus"));
+      window.addEventListener("pageshow", () => scheduleFlush("pageshow"));
       document.addEventListener("visibilitychange", () => {
         if (!document.hidden) {
           scheduleFlush("visibility");

@@ -8,6 +8,7 @@ from app.db import Base
 
 if TYPE_CHECKING:
     from app.models.broker_telemetry_event import BrokerTelemetryEvent
+    from app.models.extension_session import ExtensionSession
     from app.models.trading_session import TradingSession
 
 
@@ -24,6 +25,10 @@ class User(Base):
         cascade="all, delete-orphan",
     )
     broker_telemetry_events: Mapped[list["BrokerTelemetryEvent"]] = relationship(
+        back_populates="user",
+        cascade="all, delete-orphan",
+    )
+    extension_sessions: Mapped[list["ExtensionSession"]] = relationship(
         back_populates="user",
         cascade="all, delete-orphan",
     )

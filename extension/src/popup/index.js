@@ -1,111 +1,110 @@
-const modeValue = document.querySelector("#modeValue");
-const apiBaseUrlValue = document.querySelector("#apiBaseUrlValue");
-const appBaseUrlValue = document.querySelector("#appBaseUrlValue");
+const summary = document.querySelector("#summary");
 const authStateValue = document.querySelector("#authStateValue");
 const authUserValue = document.querySelector("#authUserValue");
 const authSyncedAtValue = document.querySelector("#authSyncedAtValue");
+const extensionStateValue = document.querySelector("#extensionStateValue");
+const monitoringStateValue = document.querySelector("#monitoringStateValue");
+const sessionStatusValue = document.querySelector("#sessionStatusValue");
+const tradingViewValue = document.querySelector("#tradingViewValue");
+const brokerValue = document.querySelector("#brokerValue");
+const adapterValue = document.querySelector("#adapterValue");
+const freshnessValue = document.querySelector("#freshnessValue");
+const warningValue = document.querySelector("#warningValue");
+const statusBody = document.querySelector("#statusBody");
 const connectButton = document.querySelector("#connectButton");
 const disconnectButton = document.querySelector("#disconnectButton");
+const refreshButton = document.querySelector("#refreshButton");
 const flushButton = document.querySelector("#flushButton");
-const summary = document.querySelector("#summary");
-const statusBody = document.querySelector("#statusBody");
-const queueBody = document.querySelector("#queueBody");
 
-function formatFlushSummary(payload) {
-  const snapshot = payload.status?.snapshot;
-  const broker = snapshot?.broker || {};
-
-  if (payload.lastFlushOutcome === "failed") {
-    return broker.broker_connected
-      ? `Observing ${broker.broker_label || "broker"} locally, but backend flush failed`
-      : "Observing TradingView locally, but backend flush failed";
+function formatTimestamp(value) {
+  if (!value) {
+    return "Never";
   }
 
-  if (payload.lastFlushOutcome === "attempted") {
-    return broker.broker_connected
-      ? `Observing ${broker.broker_label || "broker"} locally, flush in progress`
-      : "Observing TradingView locally, flush in progress";
+  const parsed = new Date(value);
+  if (Number.isNaN(parsed.getTime())) {
+    return value;
   }
 
-  if (payload.lastSuccessAt) {
-    return broker.broker_connected
-      ? `Observed locally and synced: ${broker.broker_label || "Unknown broker"}`
-      : "TradingView observed locally and synced, broker not confirmed connected";
+  return parsed.toLocaleString();
+}
+
+function formatStatusSummary(payload) {
+  const settings = payload.settings;
+  const extensionState = settings.extensionState || "unknown";
+  const monitoringState = settings.monitoringState || "inactive";
+
+  if (!settings.authToken) {
+    return "Sign in from the web app to connect the extension.";
   }
 
-  if (payload.queueDepth > 0) {
-    return broker.broker_connected
-      ? `Observing ${broker.broker_label || "broker"} locally only, waiting to sync`
-      : "Observing TradingView locally only, waiting to sync";
+  if (extensionState === "tradingview_not_detected") {
+    return "Tilt-Guard is connected. Open a TradingView chart to start monitoring.";
   }
 
-  return payload.settings.authToken
-    ? "Journal connected. Open a TradingView chart to start syncing."
-    : "Connect the journal to enable backend sync.";
+  if (extensionState === "adapter_unmatched") {
+    return "TradingView is detected. Monitoring is active with the base adapter.";
+  }
+
+  if (monitoringState === "active") {
+    return "Monitoring is active and ready for live TradingView testing.";
+  }
+
+  if (monitoringState === "stale") {
+    return "Telemetry is stale. Focus the TradingView chart to refresh monitoring.";
+  }
+
+  return "Tilt-Guard is connected and scanning the browser session.";
+}
+
+async function loadStatus() {
+  return chrome.runtime.sendMessage({ type: "telemetry:get-status" });
 }
 
 function renderStatus(payload) {
-  if (!payload?.status) {
-    summary.textContent = formatFlushSummary(payload);
-    statusBody.textContent = "Open a TradingView chart page with the content script active.";
-    return;
-  }
+  const settings = payload.settings;
+  const latestStatus = payload.status;
+  const snapshot = latestStatus?.snapshot;
+  const adapter = latestStatus?.adapter;
 
-  const snapshot = payload.status.snapshot;
-  summary.textContent = formatFlushSummary(payload);
+  summary.textContent = formatStatusSummary(payload);
+  authStateValue.textContent = settings.authToken ? "Signed in" : "Signed out";
+  authUserValue.textContent = settings.authUserEmail || "Unknown";
+  authSyncedAtValue.textContent = formatTimestamp(settings.authSyncedAt);
+  extensionStateValue.textContent = settings.extensionState || "unknown";
+  monitoringStateValue.textContent = settings.monitoringState || "inactive";
+  sessionStatusValue.textContent = settings.extensionSessionStatus || "offline";
+  tradingViewValue.textContent =
+    settings.tradingViewTabCount > 0 ? `${settings.tradingViewTabCount} chart tab(s)` : "Not detected";
+  brokerValue.textContent = settings.detectedBrokerProfile || "Unknown";
+  adapterValue.textContent = `${settings.detectedBrokerAdapter || "tradingview_base"} (${Math.round(
+    (settings.detectedAdapterConfidence || 0) * 100,
+  )}%)`;
+  freshnessValue.textContent = latestStatus?.updatedAt ? formatTimestamp(latestStatus.updatedAt) : "No telemetry yet";
+  warningValue.textContent = settings.currentWarning || "None";
+
+  disconnectButton.disabled = !settings.authToken;
 
   statusBody.textContent = JSON.stringify(
     {
-      pageTitle: payload.status.pageTitle,
-      pageUrl: payload.status.pageUrl,
-      updatedAt: payload.status.updatedAt,
-      configuredApiBaseUrl: payload.settings.apiBaseUrl || null,
-      configuredAppBaseUrl: payload.settings.appBaseUrl || null,
-      lastAttemptUrl: payload.lastAttemptUrl,
-      lastFlushOutcome: payload.lastFlushOutcome || "never_attempted",
-      lastAttemptAt: payload.lastAttemptAt,
-      lastSuccessAt: payload.lastSuccessAt,
-      lastFlushStatusCode: payload.lastFlushStatusCode,
-      lastFlushTrigger: payload.lastFlushTrigger,
-      lastFlushBatchSize: payload.lastFlushBatchSize,
-      lastError: payload.lastError || null,
+      extensionState: settings.extensionState,
+      monitoringState: settings.monitoringState,
+      extensionSessionStatus: settings.extensionSessionStatus,
+      detectedBrokerAdapter: settings.detectedBrokerAdapter,
+      detectedBrokerProfile: settings.detectedBrokerProfile,
+      detectedAdapterConfidence: settings.detectedAdapterConfidence,
+      detectedAdapterReliability: settings.detectedAdapterReliability,
+      latestPageUrl: latestStatus?.pageUrl || null,
+      latestPageTitle: latestStatus?.pageTitle || null,
+      warning: settings.currentWarning || null,
+      lastFlushOutcome: payload.lastFlushOutcome || null,
+      queueDepth: payload.queueDepth,
+      adapter,
       snapshot,
     },
     null,
     2,
   );
-}
-
-function renderQueue(payload) {
-  const lines = [
-    `mode: ${payload.settings.mode || "unknown"}`,
-    `configuredApiBaseUrl: ${payload.settings.apiBaseUrl || "unset"}`,
-    `configuredAppBaseUrl: ${payload.settings.appBaseUrl || "unset"}`,
-    `queueDepth: ${payload.queueDepth}`,
-    `lastAttemptUrl: ${payload.lastAttemptUrl || "never"}`,
-    `lastFlushOutcome: ${payload.lastFlushOutcome || "never_attempted"}`,
-    `lastAttemptAt: ${payload.lastAttemptAt || "never"}`,
-    `lastSuccessAt: ${payload.lastSuccessAt || "never"}`,
-    `lastFlushStatusCode: ${payload.lastFlushStatusCode ?? "none"}`,
-    `lastFlushTrigger: ${payload.lastFlushTrigger || "none"}`,
-    `lastFlushBatchSize: ${payload.lastFlushBatchSize ?? 0}`,
-    `lastError: ${payload.lastError || "none"}`,
-  ];
-  queueBody.textContent = lines.join("\n");
-}
-
-function renderConnection(payload) {
-  modeValue.textContent = payload.settings.mode || "Unknown";
-  apiBaseUrlValue.textContent = payload.settings.apiBaseUrl || "unset";
-  appBaseUrlValue.textContent = payload.settings.appBaseUrl || "unset";
-  authStateValue.textContent = payload.settings.authToken ? "Connected" : "Not connected";
-  authUserValue.textContent = payload.settings.authUserEmail || "Unknown";
-  authSyncedAtValue.textContent = payload.settings.authSyncedAt || "Never";
-  disconnectButton.disabled = !payload.settings.authToken;
-}
-
-async function loadStatus() {
-  return chrome.runtime.sendMessage({ type: "telemetry:get-status" });
 }
 
 async function refresh() {
@@ -114,10 +113,7 @@ async function refresh() {
     summary.textContent = "Unable to load extension status.";
     return;
   }
-
-  renderConnection(response);
   renderStatus(response);
-  renderQueue(response);
 }
 
 connectButton.addEventListener("click", async () => {
@@ -135,11 +131,11 @@ connectButton.addEventListener("click", async () => {
 });
 
 disconnectButton.addEventListener("click", async () => {
-  await chrome.storage.local.set({
-    authToken: "",
-    authUserEmail: "",
-    authSyncedAt: "",
-  });
+  await chrome.runtime.sendMessage({ type: "extension:disconnect-auth" });
+  await refresh();
+});
+
+refreshButton.addEventListener("click", async () => {
   await refresh();
 });
 

@@ -335,6 +335,8 @@
         trading_surface_visible: Boolean(chartRegion || topTradeButton || tradingPanelRoot),
         trading_panel_visible: Boolean(tradingPanelRoot),
         current_symbol: currentSymbol,
+        document_hidden: document.hidden,
+        visibility_state: document.visibilityState || "visible",
         account_manager_entrypoint_visible: Boolean(accountManagerButton),
         broker_selector_visible: Boolean(brokerSelectorButton),
         order_entry_control_visible: Boolean(orderEntryButton),

@@ -8,8 +8,17 @@ import { JournalConsole } from "../components/JournalConsole";
 import { LiveTradingStatus } from "../components/LiveTradingStatus";
 import { LoadingView } from "../components/LoadingView";
 import { ScreenshotGallery } from "../components/ScreenshotGallery";
+import { SystemActivityFeed } from "../components/SystemActivityFeed";
 import { useAuth } from "../context/AuthContext";
-import { getTelemetryStatusCopy, useLatestBrokerTelemetry } from "../lib/brokerTelemetry";
+import {
+  getLiveAccountName,
+  getLiveBrokerLabel,
+  getLiveSymbol,
+  getUnifiedMonitoringStatusCopy,
+  useBrokerSystemFeed,
+  useExtensionSessionStatus,
+  useLatestBrokerTelemetry,
+} from "../lib/brokerTelemetry";
 import {
   closeTrade,
   createJournalEntry,
@@ -234,6 +243,8 @@ export function JournalPage() {
   const { sessionId } = useParams();
   const { token } = useAuth();
   const liveTelemetry = useLatestBrokerTelemetry(token);
+  const extensionSession = useExtensionSessionStatus(token);
+  const brokerSystemFeed = useBrokerSystemFeed(token, 16);
   const [session, setSession] = useState(null);
   const [journalEntries, setJournalEntries] = useState([]);
   const [tradeEvents, setTradeEvents] = useState([]);
@@ -261,13 +272,14 @@ export function JournalPage() {
   const activePrompt = workflow
     ? GUIDED_WORKFLOWS[workflow.type][workflow.stepIndex]
     : null;
-  const telemetryStatus = getTelemetryStatusCopy(liveTelemetry.telemetry);
-  const ribbonBroker =
-    liveTelemetry.telemetry?.snapshot?.broker?.broker_label ||
-    liveTelemetry.telemetry?.broker_adapter?.toUpperCase() ||
-    "Unavailable";
-  const ribbonAccount = liveTelemetry.telemetry?.account_name || "Unavailable";
-  const ribbonSymbol = liveTelemetry.telemetry?.symbol || session?.symbol || "Unavailable";
+  const unifiedMonitoringStatus = getUnifiedMonitoringStatusCopy(
+    extensionSession.session,
+    liveTelemetry.telemetry,
+  );
+  const liveSymbol = getLiveSymbol(extensionSession.session, liveTelemetry.telemetry, session?.symbol);
+  const ribbonBroker = getLiveBrokerLabel(extensionSession.session, liveTelemetry.telemetry, "Unavailable");
+  const ribbonAccount = getLiveAccountName(extensionSession.session, liveTelemetry.telemetry, "Unavailable");
+  const ribbonSymbol = liveSymbol || "Unavailable";
   const ribbonModeLabel = activePrompt
     ? `${workflow.type.toUpperCase()} • ${activePrompt.label}`
     : "LIVE NOTE";
@@ -1018,8 +1030,8 @@ export function JournalPage() {
       {isMinimizedMode ? (
         <section className="journal-minimized-ribbon">
           <div className="journal-ribbon-strip">
-            <span className={`journal-ribbon-dot ${telemetryStatus.tone}`} />
-            <span className="journal-ribbon-pill">{telemetryStatus.label}</span>
+            <span className={`journal-ribbon-dot ${unifiedMonitoringStatus.tone}`} />
+            <span className="journal-ribbon-pill">{unifiedMonitoringStatus.label}</span>
             <span className="journal-ribbon-meta">Broker {ribbonBroker}</span>
             <span className="journal-ribbon-meta">Acct {ribbonAccount}</span>
             <span className="journal-ribbon-meta">Sym {ribbonSymbol}</span>
@@ -1049,10 +1061,13 @@ export function JournalPage() {
       ) : (
         <>
           <LiveTradingStatus
-            error={liveTelemetry.error}
-            isLoading={liveTelemetry.isLoading}
-            isRefreshing={liveTelemetry.isRefreshing}
-            onRefresh={liveTelemetry.refresh}
+            error={extensionSession.error || liveTelemetry.error}
+            extensionSession={extensionSession.session}
+            isLoading={liveTelemetry.isLoading || extensionSession.isLoading}
+            isRefreshing={liveTelemetry.isRefreshing || extensionSession.isRefreshing}
+            onRefresh={async () => {
+              await Promise.all([liveTelemetry.refresh(), extensionSession.refresh()]);
+            }}
             telemetry={liveTelemetry.telemetry}
             title="Live Context"
             variant="strip"
@@ -1061,7 +1076,7 @@ export function JournalPage() {
           <section className="journal-top-strip glass-panel">
             <div className="session-line">
               <strong>#{session.id}</strong>
-              <span>{session.symbol}</span>
+              <span>{liveSymbol || session.symbol}</span>
               <span>{session.session_name}</span>
               <span>{displaySessionField(session.market_bias)}</span>
               <span>{displaySessionField(session.htf_condition)}</span>
@@ -1133,6 +1148,8 @@ export function JournalPage() {
               ) : null}
             </div>
           </section>
+
+          <SystemActivityFeed events={brokerSystemFeed.events} title="TradingView activity" />
         </>
       )}
 
@@ -1249,7 +1266,7 @@ export function JournalPage() {
             <dl className="dense-detail-list">
               <div>
                 <dt>Symbol</dt>
-                <dd>{session.symbol}</dd>
+                <dd>{liveSymbol || session.symbol}</dd>
               </div>
               <div>
                 <dt>Started</dt>

@@ -11,10 +11,12 @@ from app.schemas.broker_telemetry import (
     BrokerTelemetryBatchIngestResponse,
     BrokerTelemetryEventListResponse,
     BrokerTelemetryLatestResponse,
+    BrokerTelemetrySystemEventListResponse,
 )
 from app.services.broker_telemetry import (
     get_latest_broker_telemetry,
     ingest_broker_telemetry_events,
+    list_broker_system_events,
     list_broker_telemetry_events,
 )
 
@@ -50,6 +52,15 @@ def get_latest_broker_telemetry_event(
         user=current_user,
         broker_adapter=broker_adapter,
     )
+
+
+@router.get("/system-feed", response_model=BrokerTelemetrySystemEventListResponse)
+def get_broker_system_events(
+    current_user: Annotated[User, Depends(get_current_user)],
+    db: Annotated[Session, Depends(get_db)],
+    limit: int = Query(default=20, ge=1, le=100),
+) -> BrokerTelemetrySystemEventListResponse:
+    return list_broker_system_events(db=db, user=current_user, limit=limit)
 
 
 @router.post("/ingest", response_model=BrokerTelemetryBatchIngestResponse, status_code=status.HTTP_202_ACCEPTED)

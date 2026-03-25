@@ -5,6 +5,15 @@ from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 
 BrokerTelemetryEventType = Literal[
+    "extension_connected",
+    "extension_disconnected",
+    "tradingview_detected",
+    "adapter_unmatched",
+    "broker_profile_matched",
+    "monitoring_activated",
+    "monitoring_stale",
+    "monitoring_lost",
+    "reconnect_succeeded",
     "tradingview_tab_detected",
     "trading_panel_visible",
     "broker_connected",
@@ -14,6 +23,7 @@ BrokerTelemetryEventType = Literal[
     "order_entry_control_visible",
     "panel_open_control_visible",
     "panel_maximize_control_visible",
+    "snapshot_refreshed",
     "observation_gap",
 ]
 
@@ -87,7 +97,7 @@ class BrokerTelemetryEventCreate(BaseModel):
     occurred_at: datetime
     source: Literal["extension"] = "extension"
     platform: Literal["tradingview"] = "tradingview"
-    broker_adapter: str = Field(default="fxcm", min_length=1, max_length=32)
+    broker_adapter: str = Field(default="tradingview_base", min_length=1, max_length=32)
     observation_key: str = Field(min_length=1, max_length=255)
     page_url: str = Field(min_length=1)
     page_title: str = Field(min_length=1)
@@ -127,6 +137,25 @@ class BrokerTelemetryEventDebugRead(BaseModel):
 
 class BrokerTelemetryEventListResponse(BaseModel):
     events: list[BrokerTelemetryEventDebugRead]
+
+
+class BrokerTelemetrySystemEventRead(BaseModel):
+    id: int
+    event_id: str
+    event_type: BrokerTelemetryEventType
+    occurred_at: datetime
+    level: Literal["info", "warning"]
+    message: str
+    broker_adapter: str
+    broker_profile: str | None = None
+    symbol: str | None = None
+    details: dict[str, Any] | None = None
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class BrokerTelemetrySystemEventListResponse(BaseModel):
+    events: list[BrokerTelemetrySystemEventRead]
 
 
 class BrokerTelemetryEventRead(BaseModel):

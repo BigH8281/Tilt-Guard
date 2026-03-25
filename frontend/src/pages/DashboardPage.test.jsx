@@ -37,9 +37,37 @@ vi.mock("../lib/brokerTelemetry", () => ({
     description: "No recent telemetry",
     tone: "offline",
   }),
+  getUnifiedMonitoringStatusCopy: () => ({
+    label: "Live",
+    description: "Monitoring is live",
+    tone: "live",
+  }),
+  getLiveSymbol: () => "NAS100",
+  getExtensionSessionStatusCopy: () => ({
+    label: "Connected",
+    description: "Extension connected",
+    tone: "live",
+  }),
   formatTelemetryFreshness: () => "No recent telemetry",
   useLatestBrokerTelemetry: () => ({
     telemetry: null,
+    error: "",
+    isLoading: false,
+    isRefreshing: false,
+    refresh: vi.fn(),
+  }),
+  useExtensionSessionStatus: () => ({
+    session: {
+      status: "live",
+      monitoring_state: "active",
+      extension_state: "monitoring_active",
+      tradingview_detected: true,
+      broker_adapter: "tradingview_fxcm",
+      broker_profile: "FXCM Live",
+      adapter_confidence: 0.95,
+      warning_message: "",
+      last_heartbeat_at: "2026-03-24T08:05:00Z",
+    },
     error: "",
     isLoading: false,
     isRefreshing: false,
@@ -109,6 +137,8 @@ describe("DashboardPage resilience", () => {
     renderDashboardPage();
 
     expect(await screen.findByText("London Open")).toBeTruthy();
+    expect(screen.getByText("Extension & Live Trading Status")).toBeTruthy();
+    expect(screen.getByText("FXCM Live")).toBeTruthy();
     expect(screen.getByText("2 open contracts")).toBeTruthy();
     expect(screen.getByText("Resume")).toBeTruthy();
     expect(

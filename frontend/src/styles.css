@@ -218,6 +218,7 @@ img {
 .live-status-card,
 .status-strip,
 .journal-top-strip,
+.system-activity-feed,
 .table-shell,
 .console-shell,
 .side-panel,
@@ -240,6 +241,10 @@ img {
 .live-status-copy,
 .live-status-grid {
   display: flex;
+}
+
+.system-activity-feed {
+  padding: 0.75rem 0.9rem;
 }
 
 .live-status-header,

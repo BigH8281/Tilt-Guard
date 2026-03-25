@@ -38,8 +38,9 @@ export const FXCM_SIGNATURE = {
 };
 
 export const OBSERVER_CONFIG = {
-  debounceMs: 750,
+  debounceMs: 400,
   heartbeatMs: 2000,
+  snapshotRefreshMs: 15000,
   observationGapMs: 10000,
   footerSearchDepth: 5,
   maxBatchSize: 50,

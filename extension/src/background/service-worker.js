@@ -1,3 +1,4 @@
+import { TELEMETRY_STALE_AFTER_MS, deriveExtensionRuntime } from "./extension-state.js";
 import { createLogger } from "../shared/log.js";
 import { EXTENSION_CONFIG } from "../shared/extension-config.js";
 import { OBSERVER_CONFIG } from "../shared/selectors.js";
@@ -5,6 +6,17 @@ import { DEFAULT_SETTINGS, STORAGE_KEYS, getSettings, getStorage, setStorage } f
 
 const logger = createLogger("background");
 const FLUSH_ALARM = "telemetry-flush";
+const HEARTBEAT_ALARM = "extension-session-heartbeat";
+const TRADINGVIEW_URL_PATTERN = "https://www.tradingview.com/chart/*";
+const EXTENSION_VERSION = chrome.runtime.getManifest().version;
+
+function buildIngestUrl(apiBaseUrl) {
+  return `${apiBaseUrl.replace(/\/$/, "")}/broker-telemetry/ingest`;
+}
+
+function buildExtensionSessionUrl(apiBaseUrl, path) {
+  return `${apiBaseUrl.replace(/\/$/, "")}/extension-sessions/${path}`;
+}
 
 async function getQueue() {
   const stored = await getStorage([STORAGE_KEYS.telemetryQueue]);
@@ -22,12 +34,8 @@ async function appendEvents(events) {
   return nextQueue;
 }
 
-async function setLastStatus(status) {
-  await setStorage({ [STORAGE_KEYS.lastKnownStatus]: status });
-}
-
-function buildIngestUrl(apiBaseUrl) {
-  return `${apiBaseUrl.replace(/\/$/, "")}/broker-telemetry/ingest`;
+async function setFlushState(partialState) {
+  await setStorage(partialState);
 }
 
 function normaliseOrigin(value) {
@@ -56,8 +64,217 @@ function isTrustedExternalSender(sender) {
   return senderOrigin ? allowedOrigins.has(senderOrigin) : false;
 }
 
-async function setFlushState(partialState) {
-  await setStorage(partialState);
+async function ensureAlarms() {
+  await chrome.alarms.create(FLUSH_ALARM, { periodInMinutes: 1 });
+  await chrome.alarms.create(HEARTBEAT_ALARM, { periodInMinutes: 1 });
+}
+
+async function scanTradingViewTabs() {
+  const tabs = await chrome.tabs.query({ url: [TRADINGVIEW_URL_PATTERN] });
+  const activeTab = tabs.find((tab) => tab.active) || tabs[0] || null;
+  await setStorage({
+    [STORAGE_KEYS.tradingViewTabCount]: tabs.length,
+    [STORAGE_KEYS.tabScanCompletedAt]: new Date().toISOString(),
+  });
+  return { tabs, activeTab };
+}
+
+function buildSnapshotContext(status) {
+  const snapshot = status?.snapshot || null;
+  return {
+    snapshot,
+    detectedBrokerAdapter: status?.adapter?.id || "tradingview_base",
+    detectedBrokerProfile: snapshot?.broker?.broker_label || "",
+    detectedAdapterConfidence: status?.adapter?.confidence ?? 0,
+    detectedAdapterReliability: status?.adapter?.reliabilityLevel || "experimental",
+    currentTabUrl: status?.pageUrl || "",
+    currentTabTitle: status?.pageTitle || "",
+    hasObservedTradingView: Boolean(snapshot?.generic?.is_tradingview_chart),
+    isTradingSurfaceVisible: Boolean(
+      snapshot?.generic?.trading_panel_visible ||
+        snapshot?.generic?.order_entry_control_visible ||
+        snapshot?.generic?.trading_surface_visible,
+    ),
+  };
+}
+
+function buildDeliveryWarning(state, runtime, snapshotContext) {
+  const flushFailed = state[STORAGE_KEYS.lastFlushOutcome] === "failed";
+  const lastKnownUpdatedAt = state[STORAGE_KEYS.lastKnownStatus]?.updatedAt;
+  const isObservationFresh =
+    snapshotContext.hasObservedTradingView && lastKnownUpdatedAt
+      ? Date.now() - Date.parse(lastKnownUpdatedAt) <= 60_000
+      : false;
+
+  const runtimeWarning = runtime.warningMessage || "";
+  if (!flushFailed || !isObservationFresh) {
+    return runtimeWarning;
+  }
+
+  const flushError = state[STORAGE_KEYS.lastError] || "backend_sync_failed";
+  const deliveryWarning = `Local monitoring is active, but backend sync is failing (${flushError}).`;
+  return runtimeWarning ? `${runtimeWarning} ${deliveryWarning}` : deliveryWarning;
+}
+
+async function deriveAndPersistRuntimeState({ preserveSessionStatus = true } = {}) {
+  const [settings, state] = await Promise.all([
+    getSettings(),
+    getStorage([
+      STORAGE_KEYS.lastKnownStatus,
+      STORAGE_KEYS.lastError,
+      STORAGE_KEYS.extensionSessionKey,
+      STORAGE_KEYS.extensionSessionStatus,
+      STORAGE_KEYS.tradingViewTabCount,
+      STORAGE_KEYS.tabScanCompletedAt,
+      STORAGE_KEYS.currentWarning,
+      STORAGE_KEYS.lastFlushOutcome,
+    ]),
+  ]);
+
+  const snapshotContext = buildSnapshotContext(state[STORAGE_KEYS.lastKnownStatus]);
+  const runtime = deriveExtensionRuntime({
+    isAuthenticated: Boolean(settings.authToken),
+    hasCompletedTabScan: Boolean(state[STORAGE_KEYS.tabScanCompletedAt]),
+    hasTradingViewTab: (state[STORAGE_KEYS.tradingViewTabCount] ?? 0) > 0,
+    hasObservedTradingView: snapshotContext.hasObservedTradingView,
+    isTradingSurfaceVisible: snapshotContext.isTradingSurfaceVisible,
+    hasMatchedBrokerAdapter: snapshotContext.detectedBrokerAdapter !== "tradingview_base",
+    isTelemetryStale: snapshotContext.hasObservedTradingView
+      ? Date.now() - Date.parse(state[STORAGE_KEYS.lastKnownStatus]?.updatedAt || 0) > TELEMETRY_STALE_AFTER_MS
+      : false,
+    lastError: preserveSessionStatus ? "" : state[STORAGE_KEYS.lastError] || "",
+  });
+  const effectiveWarning = buildDeliveryWarning(state, runtime, snapshotContext);
+
+  const nextState = {
+    [STORAGE_KEYS.extensionState]: runtime.extensionState,
+    [STORAGE_KEYS.monitoringState]: runtime.monitoringState,
+    [STORAGE_KEYS.currentWarning]: effectiveWarning,
+    [STORAGE_KEYS.detectedBrokerAdapter]: snapshotContext.detectedBrokerAdapter,
+    [STORAGE_KEYS.detectedBrokerProfile]: snapshotContext.detectedBrokerProfile,
+    [STORAGE_KEYS.detectedAdapterConfidence]: snapshotContext.detectedAdapterConfidence,
+    [STORAGE_KEYS.detectedAdapterReliability]: snapshotContext.detectedAdapterReliability,
+  };
+  if (snapshotContext.hasObservedTradingView) {
+    nextState[STORAGE_KEYS.tradingViewDetectedAt] = state[STORAGE_KEYS.lastKnownStatus]?.updatedAt || "";
+  }
+
+  await setStorage(nextState);
+  return {
+    runtime,
+    effectiveWarning,
+    settings,
+    state,
+    snapshotContext,
+  };
+}
+
+function buildExtensionSessionPayload({ runtime, effectiveWarning, settings, state, snapshotContext }) {
+  const snapshot = snapshotContext.snapshot;
+  return {
+    extension_id: chrome.runtime.id,
+    extension_version: EXTENSION_VERSION,
+    platform: "tradingview",
+    extension_state: runtime.extensionState,
+    monitoring_state: runtime.monitoringState,
+    tradingview_detected: snapshotContext.hasObservedTradingView || (state[STORAGE_KEYS.tradingViewTabCount] ?? 0) > 0,
+    broker_adapter: snapshotContext.detectedBrokerAdapter,
+    broker_profile: snapshotContext.detectedBrokerProfile || null,
+    adapter_confidence: snapshotContext.detectedAdapterConfidence,
+    adapter_reliability: snapshotContext.detectedAdapterReliability,
+    warning_message: effectiveWarning || null,
+    current_tab_url: snapshotContext.currentTabUrl || null,
+    current_tab_title: snapshotContext.currentTabTitle || null,
+    status_payload: {
+      symbol: snapshot?.generic?.current_symbol || null,
+      account_name: snapshot?.broker?.current_account_name || null,
+      document_hidden: snapshot?.generic?.document_hidden ?? false,
+      visibility_state: snapshot?.generic?.visibility_state || "visible",
+      trading_panel_visible: snapshot?.generic?.trading_panel_visible || false,
+      order_entry_control_visible: snapshot?.generic?.order_entry_control_visible || false,
+      account_manager_entrypoint_visible: snapshot?.generic?.account_manager_entrypoint_visible || false,
+      broker_selector_visible: snapshot?.generic?.broker_selector_visible || false,
+      panel_open_control_visible: snapshot?.generic?.panel_open_control_visible || false,
+      panel_maximize_control_visible: snapshot?.generic?.panel_maximize_control_visible || false,
+      anchor_summary: snapshot?.broker?.anchor_summary || {},
+      fxcm_footer_cluster_visible: snapshot?.broker?.fxcm_footer_cluster_visible || false,
+      telemetry_updated_at: state[STORAGE_KEYS.lastKnownStatus]?.updatedAt || null,
+      app_base_url: settings.appBaseUrl,
+      api_base_url: settings.apiBaseUrl,
+    },
+  };
+}
+
+async function syncExtensionSession(trigger = "manual") {
+  const stateContext = await deriveAndPersistRuntimeState();
+  if (!stateContext.settings.authToken) {
+    return { ok: false, skipped: true, reason: "missing_auth_token" };
+  }
+
+  const endpoint = stateContext.state[STORAGE_KEYS.extensionSessionKey] ? "heartbeat" : "connect";
+  const url = buildExtensionSessionUrl(stateContext.settings.apiBaseUrl, endpoint);
+  const payload = buildExtensionSessionPayload(stateContext);
+
+  try {
+    const response = await fetch(url, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${stateContext.settings.authToken}`,
+      },
+      body: JSON.stringify(payload),
+    });
+
+    if (!response.ok) {
+      const errorText = await response.text();
+      throw new Error(`${response.status}:${errorText || "request_failed"}`);
+    }
+
+    const body = await response.json();
+    await setStorage({
+      [STORAGE_KEYS.extensionSessionKey]: body.session.session_key,
+      [STORAGE_KEYS.extensionSessionStatus]: body.session.status,
+    });
+    logger.info("extension_session_synced", {
+      trigger,
+      endpoint,
+      sessionStatus: body.session.status,
+      extensionState: body.session.extension_state,
+    });
+    return { ok: true, skipped: false, session: body.session };
+  } catch (error) {
+    logger.warn("extension_session_sync_failed", {
+      trigger,
+      endpoint,
+      error: String(error),
+    });
+    await setStorage({
+      [STORAGE_KEYS.extensionSessionStatus]: "offline",
+    });
+    return { ok: false, skipped: false, error: String(error) };
+  }
+}
+
+async function disconnectExtensionSession() {
+  const settings = await getSettings();
+  if (!settings.authToken) {
+    return;
+  }
+
+  try {
+    await fetch(buildExtensionSessionUrl(settings.apiBaseUrl, "disconnect"), {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${settings.authToken}`,
+      },
+      body: JSON.stringify({
+        extension_id: chrome.runtime.id,
+      }),
+    });
+  } catch (error) {
+    logger.warn("extension_session_disconnect_failed", { error: String(error) });
+  }
 }
 
 async function flushQueue(trigger = "unknown") {
@@ -124,17 +341,6 @@ async function flushQueue(trigger = "unknown") {
       [STORAGE_KEYS.lastFlushStatusCode]: response.status,
       [STORAGE_KEYS.lastError]: errorMessage,
     });
-    if (response.status === 401 || response.status === 403) {
-      logger.warn("telemetry_ingest_auth_failed", {
-        status: response.status,
-        trigger,
-      });
-    } else {
-      logger.warn("telemetry_ingest_failed", {
-        status: response.status,
-        trigger,
-      });
-    }
     throw new Error(`Broker telemetry ingest failed: ${response.status}`);
   }
 
@@ -151,8 +357,25 @@ async function flushQueue(trigger = "unknown") {
   return { sent: batch.length, skipped: false, accepted: result.accepted, status: response.status };
 }
 
-async function ensureAlarm() {
-  await chrome.alarms.create(FLUSH_ALARM, { periodInMinutes: 1 });
+async function refreshRuntimeState(trigger = "runtime_refresh", { syncSession = true } = {}) {
+  await scanTradingViewTabs();
+  const runtimeState = await deriveAndPersistRuntimeState();
+  if (syncSession) {
+    await syncExtensionSession(trigger);
+  }
+  return runtimeState;
+}
+
+async function clearAuthState() {
+  await disconnectExtensionSession();
+  await setStorage({
+    [STORAGE_KEYS.authToken]: "",
+    [STORAGE_KEYS.authUserEmail]: "",
+    [STORAGE_KEYS.authSyncedAt]: "",
+    [STORAGE_KEYS.extensionSessionKey]: "",
+    [STORAGE_KEYS.extensionSessionStatus]: "",
+  });
+  await refreshRuntimeState("auth_cleared", { syncSession: false });
 }
 
 chrome.runtime.onInstalled.addListener(async () => {
@@ -161,35 +384,48 @@ chrome.runtime.onInstalled.addListener(async () => {
     [STORAGE_KEYS.apiBaseUrl]: DEFAULT_SETTINGS.apiBaseUrl,
     [STORAGE_KEYS.appBaseUrl]: DEFAULT_SETTINGS.appBaseUrl,
   });
-  await ensureAlarm();
+  await ensureAlarms();
+  await refreshRuntimeState("installed");
 });
 
 chrome.runtime.onStartup.addListener(async () => {
-  await ensureAlarm();
+  await ensureAlarms();
+  await refreshRuntimeState("startup");
+});
+
+chrome.tabs.onUpdated.addListener(() => {
+  void refreshRuntimeState("tabs_updated", { syncSession: false });
+});
+chrome.tabs.onRemoved.addListener(() => {
+  void refreshRuntimeState("tabs_removed", { syncSession: false });
+});
+chrome.tabs.onActivated.addListener(() => {
+  void refreshRuntimeState("tabs_activated", { syncSession: false });
 });
 
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   if (message?.type === "telemetry:observed") {
     void (async () => {
       const queue = await appendEvents(message.payload.events);
-      await setLastStatus({
-        pageUrl: message.payload.pageUrl,
-        pageTitle: message.payload.pageTitle,
-        snapshot: message.payload.snapshot,
-        queued: queue.length,
-        tabId: sender.tab?.id || null,
-        updatedAt: new Date().toISOString(),
+      await setStorage({
+        [STORAGE_KEYS.lastKnownStatus]: {
+          pageUrl: message.payload.pageUrl,
+          pageTitle: message.payload.pageTitle,
+          snapshot: message.payload.snapshot,
+          adapter: message.payload.adapter,
+          queued: queue.length,
+          tabId: sender.tab?.id || null,
+          updatedAt: new Date().toISOString(),
+        },
       });
-      logger.info("events_enqueued", {
-        count: message.payload.events.length,
-        queued: queue.length,
-        tabId: sender.tab?.id || null,
-      });
+      await refreshRuntimeState("telemetry_observed");
+
       try {
         await flushQueue("enqueue");
       } catch (error) {
         logger.warn("flush_failed_after_enqueue", { error: String(error) });
       }
+
       sendResponse({ ok: true });
     })();
     return true;
@@ -197,6 +433,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
 
   if (message?.type === "telemetry:get-status") {
     void (async () => {
+      await refreshRuntimeState("popup_status", { syncSession: false });
       const [queue, settings, state] = await Promise.all([
         getQueue(),
         getSettings(),
@@ -230,22 +467,6 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     return true;
   }
 
-  if (message?.type === "telemetry:update-settings") {
-    void (async () => {
-      await setStorage({
-        [STORAGE_KEYS.apiBaseUrl]: message.payload.apiBaseUrl || DEFAULT_SETTINGS.apiBaseUrl,
-        [STORAGE_KEYS.appBaseUrl]: message.payload.appBaseUrl || DEFAULT_SETTINGS.appBaseUrl,
-      });
-      try {
-        await flushQueue("settings_update");
-      } catch (error) {
-        logger.warn("flush_failed_after_settings_update", { error: String(error) });
-      }
-      sendResponse({ ok: true });
-    })();
-    return true;
-  }
-
   if (message?.type === "telemetry:flush-now") {
     void (async () => {
       try {
@@ -254,6 +475,14 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       } catch (error) {
         sendResponse({ ok: false, error: String(error) });
       }
+    })();
+    return true;
+  }
+
+  if (message?.type === "extension:disconnect-auth") {
+    void (async () => {
+      await clearAuthState();
+      sendResponse({ ok: true });
     })();
     return true;
   }
@@ -275,9 +504,7 @@ chrome.runtime.onMessageExternal.addListener((message, sender, sendResponse) => 
         [STORAGE_KEYS.authUserEmail]: message.payload.userEmail || "",
         [STORAGE_KEYS.authSyncedAt]: new Date().toISOString(),
       });
-      logger.info("external_auth_sync_applied", {
-        userEmail: message.payload.userEmail || null,
-      });
+      await refreshRuntimeState("external_auth_sync");
 
       try {
         await flushQueue("external_auth_sync");
@@ -297,12 +524,7 @@ chrome.runtime.onMessageExternal.addListener((message, sender, sendResponse) => 
         return;
       }
 
-      await setStorage({
-        [STORAGE_KEYS.authToken]: "",
-        [STORAGE_KEYS.authUserEmail]: "",
-        [STORAGE_KEYS.authSyncedAt]: "",
-      });
-      logger.info("external_auth_cleared");
+      await clearAuthState();
       sendResponse({ ok: true });
     })();
     return true;
@@ -312,11 +534,16 @@ chrome.runtime.onMessageExternal.addListener((message, sender, sendResponse) => 
 });
 
 chrome.alarms.onAlarm.addListener((alarm) => {
-  if (alarm.name !== FLUSH_ALARM) {
+  if (alarm.name === FLUSH_ALARM) {
+    void flushQueue("alarm").catch((error) => {
+      logger.warn("scheduled_flush_failed", { error: String(error) });
+    });
     return;
   }
 
-  void flushQueue("alarm").catch((error) => {
-    logger.warn("scheduled_flush_failed", { error: String(error) });
-  });
+  if (alarm.name === HEARTBEAT_ALARM) {
+    void refreshRuntimeState("heartbeat_alarm").catch((error) => {
+      logger.warn("heartbeat_refresh_failed", { error: String(error) });
+    });
+  }
 });

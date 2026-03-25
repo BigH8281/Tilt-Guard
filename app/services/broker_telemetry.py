@@ -1,9 +1,11 @@
 from datetime import datetime, timedelta, timezone
+from uuid import uuid4
 
 from sqlalchemy import desc, select
 from sqlalchemy.orm import Session
 
 from app.models.broker_telemetry_event import BrokerTelemetryEvent
+from app.models.extension_session import ExtensionSession
 from app.models.user import User
 from app.schemas.broker_telemetry import (
     BrokerTelemetryBatchIngestRequest,
@@ -12,6 +14,8 @@ from app.schemas.broker_telemetry import (
     BrokerTelemetryIngestResult,
     BrokerTelemetryLatestRead,
     BrokerTelemetryLatestResponse,
+    BrokerTelemetrySystemEventListResponse,
+    BrokerTelemetrySystemEventRead,
 )
 
 FRESH_TELEMETRY_WINDOW_SECONDS = 30
@@ -25,6 +29,30 @@ TRANSITIONAL_EVENT_TYPES = {
     "order_entry_control_visible",
     "panel_open_control_visible",
     "panel_maximize_control_visible",
+}
+SYSTEM_EVENT_TYPES = {
+    "extension_connected",
+    "extension_disconnected",
+    "tradingview_detected",
+    "adapter_unmatched",
+    "broker_profile_matched",
+    "monitoring_activated",
+    "monitoring_stale",
+    "monitoring_lost",
+    "reconnect_succeeded",
+}
+OBSERVATION_EVENT_TYPES = {
+    "tradingview_tab_detected",
+    "trading_panel_visible",
+    "broker_connected",
+    "broker_disconnected",
+    "broker_label_changed",
+    "account_manager_control_visible",
+    "order_entry_control_visible",
+    "panel_open_control_visible",
+    "panel_maximize_control_visible",
+    "snapshot_refreshed",
+    "observation_gap",
 }
 
 
@@ -166,6 +194,210 @@ def _derive_status(snapshot: dict, *, freshness_seconds: int, is_fresh: bool) ->
     return "offline"
 
 
+def _record_internal_event(
+    db: Session,
+    *,
+    user: User,
+    event_type: str,
+    broker_adapter: str,
+    page_url: str,
+    page_title: str,
+    snapshot: dict,
+    details: dict | None = None,
+) -> None:
+    db.add(
+        BrokerTelemetryEvent(
+            user_id=user.id,
+            event_id=str(uuid4()),
+            event_type=event_type,
+            source="extension",
+            platform="tradingview",
+            broker_adapter=broker_adapter,
+            observation_key=f"extension-session:{broker_adapter}:{page_url}",
+            page_url=page_url,
+            page_title=page_title,
+            occurred_at=datetime.utcnow(),
+            snapshot=snapshot,
+            details=details or {},
+        )
+    )
+
+
+def _build_extension_snapshot(session: ExtensionSession) -> dict:
+    payload = session.status_payload or {}
+    return {
+        "generic": {
+            "is_tradingview_chart": session.tradingview_detected,
+            "trading_surface_visible": session.tradingview_detected,
+            "trading_panel_visible": payload.get("trading_panel_visible", False),
+            "current_symbol": payload.get("symbol"),
+            "account_manager_entrypoint_visible": payload.get("account_manager_entrypoint_visible", False),
+            "broker_selector_visible": payload.get("broker_selector_visible", False),
+            "order_entry_control_visible": payload.get("order_entry_control_visible", False),
+            "panel_open_control_visible": payload.get("panel_open_control_visible", False),
+            "panel_maximize_control_visible": payload.get("panel_maximize_control_visible", False),
+        },
+        "broker": {
+            "broker_connected": session.broker_adapter not in {None, "", "tradingview_base"},
+            "broker_label": session.broker_profile,
+            "current_account_name": payload.get("account_name"),
+            "fxcm_footer_cluster_visible": payload.get("fxcm_footer_cluster_visible", False),
+            "anchor_summary": payload.get("anchor_summary") or {},
+        },
+    }
+
+
+def record_extension_system_events(
+    db: Session,
+    *,
+    user: User,
+    session: ExtensionSession,
+    payload,
+    previous_state: dict | None,
+    disconnected: bool = False,
+) -> None:
+    snapshot = _build_extension_snapshot(session)
+    page_url = session.current_tab_url or "extension://status"
+    page_title = session.current_tab_title or "Tilt Guard Extension"
+    broker_adapter = session.broker_adapter or "tradingview_base"
+
+    if previous_state is None:
+        _record_internal_event(
+            db,
+            user=user,
+            event_type="extension_connected",
+            broker_adapter=broker_adapter,
+            page_url=page_url,
+            page_title=page_title,
+            snapshot=snapshot,
+            details={"extension_state": session.extension_state},
+        )
+    elif disconnected:
+        _record_internal_event(
+            db,
+            user=user,
+            event_type="extension_disconnected",
+            broker_adapter=broker_adapter,
+            page_url=page_url,
+            page_title=page_title,
+            snapshot=snapshot,
+            details={"previous_monitoring_state": previous_state.get("monitoring_state")},
+        )
+        return
+
+    if not previous_state:
+        previous_state = {}
+
+    if not previous_state.get("tradingview_detected") and session.tradingview_detected:
+        _record_internal_event(
+            db,
+            user=user,
+            event_type="tradingview_detected",
+            broker_adapter=broker_adapter,
+            page_url=page_url,
+            page_title=page_title,
+            snapshot=snapshot,
+        )
+
+    previous_adapter = previous_state.get("broker_adapter")
+    if session.broker_adapter == "tradingview_base" and previous_adapter != "tradingview_base":
+        _record_internal_event(
+            db,
+            user=user,
+            event_type="adapter_unmatched",
+            broker_adapter=broker_adapter,
+            page_url=page_url,
+            page_title=page_title,
+            snapshot=snapshot,
+            details={"warning_message": session.warning_message},
+        )
+
+    if session.broker_adapter not in {None, "", "tradingview_base"} and previous_adapter != session.broker_adapter:
+        _record_internal_event(
+            db,
+            user=user,
+            event_type="broker_profile_matched",
+            broker_adapter=broker_adapter,
+            page_url=page_url,
+            page_title=page_title,
+            snapshot=snapshot,
+            details={
+                "broker_profile": session.broker_profile,
+                "adapter_confidence": session.adapter_confidence,
+                "adapter_reliability": session.adapter_reliability,
+            },
+        )
+
+    previous_monitoring_state = previous_state.get("monitoring_state")
+    if session.monitoring_state == "active" and previous_monitoring_state != "active":
+        event_type = "reconnect_succeeded" if previous_monitoring_state == "stale" else "monitoring_activated"
+        _record_internal_event(
+            db,
+            user=user,
+            event_type=event_type,
+            broker_adapter=broker_adapter,
+            page_url=page_url,
+            page_title=page_title,
+            snapshot=snapshot,
+        )
+
+    if session.monitoring_state == "stale" and previous_monitoring_state != "stale":
+        _record_internal_event(
+            db,
+            user=user,
+            event_type="monitoring_stale",
+            broker_adapter=broker_adapter,
+            page_url=page_url,
+            page_title=page_title,
+            snapshot=snapshot,
+            details={"warning_message": session.warning_message},
+        )
+
+    if previous_monitoring_state == "active" and session.monitoring_state in {"inactive", "error"}:
+        _record_internal_event(
+            db,
+            user=user,
+            event_type="monitoring_lost",
+            broker_adapter=broker_adapter,
+            page_url=page_url,
+            page_title=page_title,
+            snapshot=snapshot,
+            details={"warning_message": session.warning_message},
+        )
+
+
+def _system_event_message(event: BrokerTelemetryEvent) -> tuple[str, str]:
+    snapshot = _normalize_snapshot(dict(event.snapshot))
+    broker = snapshot.get("broker") or {}
+    generic = snapshot.get("generic") or {}
+    broker_profile = broker.get("broker_label") or ((event.details or {}).get("broker_profile"))
+    symbol = generic.get("current_symbol")
+
+    messages = {
+        "extension_connected": ("info", "Extension connected to Tilt-Guard."),
+        "extension_disconnected": ("warning", "Extension disconnected from Tilt-Guard."),
+        "tradingview_detected": ("info", "TradingView chart session detected."),
+        "adapter_unmatched": ("warning", "TradingView detected, but broker profile is still unknown."),
+        "broker_profile_matched": ("info", f"Broker profile matched: {broker_profile or event.broker_adapter}."),
+        "monitoring_activated": ("info", "Live monitoring activated."),
+        "monitoring_stale": ("warning", "Telemetry became stale. Reconnect in progress."),
+        "monitoring_lost": ("warning", "Monitoring lost or degraded."),
+        "reconnect_succeeded": ("info", "Monitoring reconnected successfully."),
+        "tradingview_tab_detected": ("info", "TradingView tab observed by the extension."),
+        "trading_panel_visible": ("info", "TradingView trading panel became visible."),
+        "broker_connected": ("info", f"Broker connection observed: {broker_profile or 'connected'}"),
+        "broker_disconnected": ("warning", "Broker connection no longer visible on TradingView."),
+        "broker_label_changed": ("info", f"Broker label updated to {broker_profile or 'a new profile'}."),
+        "account_manager_control_visible": ("info", "TradingView account manager control detected."),
+        "order_entry_control_visible": ("info", f"Trade entry surface visible{f' for {symbol}' if symbol else ''}."),
+        "panel_open_control_visible": ("info", "TradingView panel open control detected."),
+        "panel_maximize_control_visible": ("info", "TradingView panel maximize control detected."),
+        "snapshot_refreshed": ("info", f"TradingView snapshot refreshed{f' for {symbol}' if symbol else ''}."),
+        "observation_gap": ("warning", "Telemetry observation gap detected."),
+    }
+    return messages.get(event.event_type, ("info", event.event_type.replace("_", " ").title()))
+
+
 def ingest_broker_telemetry_events(
     db: Session,
     user: User,
@@ -246,6 +478,7 @@ def get_latest_broker_telemetry(
     statement = (
         select(BrokerTelemetryEvent)
         .where(BrokerTelemetryEvent.user_id == user.id)
+        .where(BrokerTelemetryEvent.event_type.in_(OBSERVATION_EVENT_TYPES))
         .order_by(desc(BrokerTelemetryEvent.occurred_at), desc(BrokerTelemetryEvent.id))
         .limit(LATEST_DERIVATION_LIMIT)
     )
@@ -287,3 +520,37 @@ def get_latest_broker_telemetry(
             status=status,
         )
     )
+
+
+def list_broker_system_events(
+    db: Session,
+    user: User,
+    *,
+    limit: int,
+) -> BrokerTelemetrySystemEventListResponse:
+    statement = (
+        select(BrokerTelemetryEvent)
+        .where(BrokerTelemetryEvent.user_id == user.id)
+        .order_by(desc(BrokerTelemetryEvent.occurred_at), desc(BrokerTelemetryEvent.id))
+        .limit(limit)
+    )
+    events = list(db.scalars(statement))
+    mapped_events: list[BrokerTelemetrySystemEventRead] = []
+    for event in events:
+        snapshot = _normalize_snapshot(dict(event.snapshot))
+        level, message = _system_event_message(event)
+        mapped_events.append(
+            BrokerTelemetrySystemEventRead(
+                id=event.id,
+                event_id=event.event_id,
+                event_type=event.event_type,
+                occurred_at=event.occurred_at,
+                level=level,
+                message=message,
+                broker_adapter=event.broker_adapter,
+                broker_profile=(snapshot.get("broker") or {}).get("broker_label"),
+                symbol=(snapshot.get("generic") or {}).get("current_symbol"),
+                details=event.details,
+            )
+        )
+    return BrokerTelemetrySystemEventListResponse(events=mapped_events)

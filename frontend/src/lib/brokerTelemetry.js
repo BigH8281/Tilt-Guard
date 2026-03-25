@@ -1,8 +1,8 @@
 import { useEffect, useState } from "react";
 
-import { fetchLatestBrokerTelemetry } from "./api";
+import { fetchBrokerSystemFeed, fetchExtensionSessionStatus, fetchLatestBrokerTelemetry } from "./api";
 
-const AUTO_REFRESH_MS = 15000;
+const AUTO_REFRESH_MS = 5000;
 
 function logTelemetryEvent(level, event, details = {}) {
   const logger = console[level] ?? console.info;
@@ -114,6 +114,140 @@ export function useLatestBrokerTelemetry(token) {
   };
 }
 
+export function useExtensionSessionStatus(token) {
+  const [session, setSession] = useState(null);
+  const [error, setError] = useState("");
+  const [isLoading, setIsLoading] = useState(true);
+  const [isRefreshing, setIsRefreshing] = useState(false);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    async function load(mode = "initial") {
+      if (!token) {
+        if (!cancelled) {
+          setSession(null);
+          setError("");
+          setIsLoading(false);
+          setIsRefreshing(false);
+        }
+        return;
+      }
+
+      if (!cancelled) {
+        if (mode === "initial") {
+          setIsLoading(true);
+        } else {
+          setIsRefreshing(true);
+        }
+      }
+
+      try {
+        const nextSession = await fetchExtensionSessionStatus(token);
+        if (!cancelled) {
+          setSession(nextSession);
+          setError("");
+        }
+      } catch (loadError) {
+        if (!cancelled) {
+          setError(loadError.message);
+        }
+      } finally {
+        if (!cancelled) {
+          setIsLoading(false);
+          setIsRefreshing(false);
+        }
+      }
+    }
+
+    load("initial");
+    const intervalId = window.setInterval(() => {
+      load("refresh");
+    }, AUTO_REFRESH_MS);
+
+    return () => {
+      cancelled = true;
+      window.clearInterval(intervalId);
+    };
+  }, [token]);
+
+  async function refresh() {
+    if (!token) {
+      return;
+    }
+
+    setIsRefreshing(true);
+    try {
+      const nextSession = await fetchExtensionSessionStatus(token);
+      setSession(nextSession);
+      setError("");
+    } catch (loadError) {
+      setError(loadError.message);
+    } finally {
+      setIsLoading(false);
+      setIsRefreshing(false);
+    }
+  }
+
+  return {
+    session,
+    error,
+    isLoading,
+    isRefreshing,
+    refresh,
+  };
+}
+
+export function useBrokerSystemFeed(token, limit = 20) {
+  const [events, setEvents] = useState([]);
+  const [error, setError] = useState("");
+  const [isLoading, setIsLoading] = useState(true);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    async function load() {
+      if (!token) {
+        if (!cancelled) {
+          setEvents([]);
+          setError("");
+          setIsLoading(false);
+        }
+        return;
+      }
+
+      try {
+        const nextEvents = await fetchBrokerSystemFeed(token, limit);
+        if (!cancelled) {
+          setEvents(nextEvents);
+          setError("");
+        }
+      } catch (loadError) {
+        if (!cancelled) {
+          setError(loadError.message);
+        }
+      } finally {
+        if (!cancelled) {
+          setIsLoading(false);
+        }
+      }
+    }
+
+    load();
+    const intervalId = window.setInterval(load, AUTO_REFRESH_MS);
+    return () => {
+      cancelled = true;
+      window.clearInterval(intervalId);
+    };
+  }, [limit, token]);
+
+  return {
+    events,
+    error,
+    isLoading,
+  };
+}
+
 export function formatTelemetryFreshness(telemetry) {
   if (!telemetry) {
     return "No recent telemetry";
@@ -174,4 +308,94 @@ export function getTelemetryStatusCopy(telemetry) {
     description: "Telemetry is stale or unavailable right now.",
     tone: "offline",
   };
+}
+
+export function getUnifiedMonitoringStatusCopy(extensionSession, telemetry) {
+  if (extensionSession) {
+    return getExtensionSessionStatusCopy(extensionSession);
+  }
+
+  return getTelemetryStatusCopy(telemetry);
+}
+
+export function getExtensionSessionStatusCopy(session) {
+  if (!session) {
+    return {
+      label: "Disconnected",
+      description: "No extension heartbeat has reached Tilt-Guard yet.",
+      tone: "offline",
+    };
+  }
+
+  if (session.status === "live" && session.monitoring_state === "active") {
+    return {
+      label: "Live",
+      description: "The extension is connected, TradingView is detected, and monitoring is live.",
+      tone: "live",
+    };
+  }
+
+  if (session.status === "live" && session.monitoring_state === "stale") {
+    const isBackgrounded =
+      session.status_payload?.document_hidden || session.status_payload?.visibility_state === "hidden";
+    return {
+      label: "Stale",
+      description: isBackgrounded
+        ? "The extension is still connected, but the TradingView chart is currently backgrounded."
+        : "The extension is still connected, but TradingView observation is temporarily degraded.",
+      tone: "attention",
+    };
+  }
+
+  if (session.status === "live") {
+    return {
+      label: "Connected",
+      description: "The extension is connected, but monitoring is still warming up or partially matched.",
+      tone: "attention",
+    };
+  }
+
+  if (session.status === "attention") {
+    return {
+      label: "Disconnected",
+      description: "Tilt-Guard recently lost an active extension heartbeat, so observation may be interrupted.",
+      tone: "attention",
+    };
+  }
+
+  return {
+    label: "Offline",
+    description: "Tilt-Guard has not heard from the extension recently.",
+    tone: "offline",
+  };
+}
+
+export function getLiveSymbol(extensionSession, telemetry, fallback = "") {
+  return (
+    extensionSession?.status_payload?.symbol ||
+    telemetry?.symbol ||
+    telemetry?.snapshot?.generic?.current_symbol ||
+    fallback ||
+    ""
+  );
+}
+
+export function getLiveAccountName(extensionSession, telemetry, fallback = "") {
+  return (
+    extensionSession?.status_payload?.account_name ||
+    telemetry?.account_name ||
+    telemetry?.snapshot?.broker?.current_account_name ||
+    fallback ||
+    ""
+  );
+}
+
+export function getLiveBrokerLabel(extensionSession, telemetry, fallback = "") {
+  return (
+    extensionSession?.broker_profile ||
+    telemetry?.snapshot?.broker?.broker_label ||
+    telemetry?.broker_adapter?.toUpperCase() ||
+    fallback ||
+    ""
+  );
 }

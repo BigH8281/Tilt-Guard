@@ -1,11 +1,16 @@
 import { Button } from "./Button";
-import { formatTelemetryFreshness, getTelemetryStatusCopy } from "../lib/brokerTelemetry";
+import {
+  formatTelemetryFreshness,
+  getLiveSymbol,
+  getUnifiedMonitoringStatusCopy,
+} from "../lib/brokerTelemetry";
 
 function renderValue(value, fallback = "Unavailable") {
   return value || fallback;
 }
 
 export function LiveTradingStatus({
+  extensionSession = null,
   telemetry,
   error = "",
   isLoading = false,
@@ -14,8 +19,10 @@ export function LiveTradingStatus({
   title = "Live Trading Status",
   variant = "card",
 }) {
-  const status = getTelemetryStatusCopy(telemetry);
+  const status = getUnifiedMonitoringStatusCopy(extensionSession, telemetry);
   const brokerLabel = telemetry?.snapshot?.broker?.broker_label;
+  const connectionBroker = extensionSession?.broker_profile || brokerLabel;
+  const liveSymbol = getLiveSymbol(extensionSession, telemetry);
   const cardClassName =
     variant === "strip"
       ? "live-status-card live-status-strip glass-panel"
@@ -43,22 +50,53 @@ export function LiveTradingStatus({
 
       <dl className="live-status-grid">
         <div>
-          <dt>Broker</dt>
-          <dd>{renderValue(brokerLabel || telemetry?.broker_adapter?.toUpperCase())}</dd>
-        </div>
-        <div>
-          <dt>Account</dt>
-          <dd>{renderValue(telemetry?.account_name)}</dd>
-        </div>
-        <div>
           <dt>Symbol</dt>
-          <dd>{renderValue(telemetry?.symbol)}</dd>
+          <dd>{renderValue(liveSymbol)}</dd>
+        </div>
+        <div>
+          <dt>Broker</dt>
+          <dd>{renderValue(connectionBroker || telemetry?.broker_adapter?.toUpperCase())}</dd>
+        </div>
+        <div>
+          <dt>Adapter</dt>
+          <dd>{renderValue(extensionSession?.broker_adapter || telemetry?.broker_adapter)}</dd>
+        </div>
+        <div>
+          <dt>Monitoring</dt>
+          <dd>{renderValue(extensionSession?.monitoring_state || telemetry?.status)}</dd>
         </div>
         <div>
           <dt>Last update</dt>
-          <dd>{formatTelemetryFreshness(telemetry)}</dd>
+          <dd>
+            {extensionSession?.status_payload?.telemetry_updated_at
+              ? new Date(extensionSession.status_payload.telemetry_updated_at).toLocaleString()
+              : extensionSession?.last_heartbeat_at
+                ? new Date(extensionSession.last_heartbeat_at).toLocaleString()
+              : formatTelemetryFreshness(telemetry)}
+          </dd>
         </div>
       </dl>
+
+      {extensionSession ? (
+        <dl className="live-status-grid">
+          <div>
+            <dt>TradingView</dt>
+            <dd>{extensionSession.tradingview_detected ? "Detected" : "Not detected"}</dd>
+          </div>
+          <div>
+            <dt>Extension State</dt>
+            <dd>{renderValue(extensionSession.extension_state)}</dd>
+          </div>
+          <div>
+            <dt>Confidence</dt>
+            <dd>{Math.round((extensionSession.adapter_confidence || 0) * 100)}%</dd>
+          </div>
+          <div>
+            <dt>Warning</dt>
+            <dd>{renderValue(extensionSession.warning_message, "None")}</dd>
+          </div>
+        </dl>
+      ) : null}
 
       {error ? <div className="alert error-alert">{error}</div> : null}
     </section>

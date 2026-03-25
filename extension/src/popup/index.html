@@ -3,25 +3,25 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Tilt Guard Telemetry</title>
+    <title>Tilt Guard</title>
     <style>
       :root {
         color-scheme: dark;
-        --bg: #101418;
-        --panel: #192028;
-        --panel-2: #222c36;
+        --bg: #0e141a;
+        --panel: #18222c;
+        --panel-alt: #11181f;
+        --border: #2b3a48;
         --text: #e6edf3;
-        --muted: #92a2b2;
-        --accent: #68d391;
-        --warn: #f6ad55;
+        --muted: #91a3b5;
+        --accent: #80d49b;
       }
 
       body {
         margin: 0;
-        min-width: 340px;
-        font: 13px/1.4 "Segoe UI", sans-serif;
-        background: linear-gradient(180deg, var(--bg), #0c1014);
+        min-width: 360px;
+        background: linear-gradient(180deg, var(--bg), #0a1015);
         color: var(--text);
+        font: 13px/1.4 "Segoe UI", sans-serif;
       }
 
       main {
@@ -32,39 +32,46 @@
 
       section {
         background: var(--panel);
-        border: 1px solid #2d3748;
-        border-radius: 10px;
+        border: 1px solid var(--border);
+        border-radius: 12px;
         padding: 12px;
       }
 
-      h1, h2 {
+      h1,
+      h2 {
         margin: 0 0 8px;
-        font-size: 14px;
       }
 
       h1 {
         font-size: 16px;
       }
 
-      button {
-        font: inherit;
-        border: 0;
-        border-radius: 8px;
-        padding: 8px 10px;
-        background: var(--accent);
-        color: #08120d;
-        font-weight: 600;
-        cursor: pointer;
+      h2 {
+        font-size: 13px;
       }
 
-      button:disabled {
-        cursor: default;
-        opacity: 0.6;
+      .summary {
+        color: var(--muted);
       }
 
-      .secondary {
-        background: #2d3748;
-        color: var(--text);
+      .grid {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 10px;
+      }
+
+      .meta-item {
+        display: grid;
+        gap: 2px;
+      }
+
+      .meta-item span {
+        color: var(--muted);
+        font-size: 11px;
+      }
+
+      .meta-item strong {
+        word-break: break-word;
       }
 
       .row {
@@ -73,28 +80,34 @@
         flex-wrap: wrap;
       }
 
-      .muted {
-        color: var(--muted);
+      button {
+        font: inherit;
+        border: 0;
+        border-radius: 8px;
+        padding: 8px 10px;
+        background: var(--accent);
+        color: #09130d;
+        font-weight: 700;
+        cursor: pointer;
       }
 
-      .mono {
-        font-family: "SFMono-Regular", Consolas, monospace;
-        word-break: break-word;
+      button.secondary {
+        background: #2b3641;
+        color: var(--text);
       }
 
-      .meta-list {
-        display: grid;
-        gap: 8px;
-        margin-bottom: 10px;
+      button:disabled {
+        opacity: 0.65;
+        cursor: default;
       }
 
-      .meta-item {
-        display: grid;
-        gap: 2px;
-      }
-
-      .meta-item strong {
-        font-size: 12px;
+      pre {
+        margin: 0;
+        background: var(--panel-alt);
+        border-radius: 10px;
+        padding: 10px;
+        overflow: auto;
+        white-space: pre-wrap;
         word-break: break-word;
       }
     </style>
@@ -102,35 +115,47 @@
   <body>
     <main>
       <section>
-        <h1>Tilt Guard Telemetry</h1>
-        <div id="summary" class="muted">Loading status...</div>
+        <h1>Tilt Guard</h1>
+        <div id="summary" class="summary">Loading extension status...</div>
       </section>
 
       <section>
         <h2>Connection</h2>
-        <div class="meta-list">
-          <div class="meta-item"><span class="muted">Mode</span><strong id="modeValue">Loading...</strong></div>
-          <div class="meta-item"><span class="muted">API</span><strong id="apiBaseUrlValue">Loading...</strong></div>
-          <div class="meta-item"><span class="muted">Journal</span><strong id="appBaseUrlValue">Loading...</strong></div>
-          <div class="meta-item"><span class="muted">Auth</span><strong id="authStateValue">Loading...</strong></div>
-          <div class="meta-item"><span class="muted">User</span><strong id="authUserValue">Loading...</strong></div>
-          <div class="meta-item"><span class="muted">Synced</span><strong id="authSyncedAtValue">Loading...</strong></div>
+        <div class="grid">
+          <div class="meta-item"><span>Auth</span><strong id="authStateValue">Loading...</strong></div>
+          <div class="meta-item"><span>User</span><strong id="authUserValue">Loading...</strong></div>
+          <div class="meta-item"><span>Synced</span><strong id="authSyncedAtValue">Loading...</strong></div>
+          <div class="meta-item"><span>Session</span><strong id="sessionStatusValue">Loading...</strong></div>
         </div>
-        <div class="row">
-          <button id="connectButton">Connect Journal</button>
+        <div class="row" style="margin-top: 10px">
+          <button id="connectButton">Connect App</button>
           <button id="disconnectButton" class="secondary">Disconnect</button>
-          <button id="flushButton" class="secondary">Flush Now</button>
         </div>
       </section>
 
       <section>
-        <h2>Latest Observation</h2>
-        <div id="statusBody" class="mono muted">No status yet.</div>
+        <h2>Monitoring</h2>
+        <div class="grid">
+          <div class="meta-item"><span>State</span><strong id="extensionStateValue">Loading...</strong></div>
+          <div class="meta-item"><span>Monitoring</span><strong id="monitoringStateValue">Loading...</strong></div>
+          <div class="meta-item"><span>TradingView</span><strong id="tradingViewValue">Loading...</strong></div>
+          <div class="meta-item"><span>Broker</span><strong id="brokerValue">Loading...</strong></div>
+          <div class="meta-item"><span>Adapter</span><strong id="adapterValue">Loading...</strong></div>
+          <div class="meta-item"><span>Latest telemetry</span><strong id="freshnessValue">Loading...</strong></div>
+        </div>
+        <div class="meta-item" style="margin-top: 10px">
+          <span>Warning</span>
+          <strong id="warningValue">None</strong>
+        </div>
+        <div class="row" style="margin-top: 10px">
+          <button id="refreshButton" class="secondary">Refresh</button>
+          <button id="flushButton" class="secondary">Flush Telemetry</button>
+        </div>
       </section>
 
       <section>
-        <h2>Queue</h2>
-        <div id="queueBody" class="mono muted">Queue unknown.</div>
+        <h2>Debug snapshot</h2>
+        <pre id="statusBody">No status yet.</pre>
       </section>
     </main>
     <script type="module" src="./index.js"></script>
