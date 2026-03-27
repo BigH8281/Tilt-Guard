@@ -15,6 +15,8 @@ import {
   fetchScreenshots,
   fetchSessionDetail,
   fetchTradeEvents,
+  syncObservedTrade,
+  updateTradeNote,
   uploadScreenshot,
 } from "../lib/api";
 import {
@@ -25,6 +27,9 @@ import {
   markPreSessionScreenshotUploading,
 } from "../lib/preSessionScreenshot";
 
+let mockTradeEvidenceEvents = [];
+let mockObservedTradeEntries = [];
+
 vi.mock("../context/AuthContext", () => ({
   useAuth: () => ({
     token: "test-token",
@@ -32,6 +37,8 @@ vi.mock("../context/AuthContext", () => ({
 }));
 
 vi.mock("../lib/brokerTelemetry", () => ({
+  deriveTradeEvidenceEpisodes: () => [],
+  deriveObservedTradeJournalEntries: () => mockObservedTradeEntries,
   formatTelemetryFreshness: () => "Updated just now",
   getUnifiedMonitoringStatusCopy: () => ({
     label: "Stale",
@@ -76,6 +83,11 @@ vi.mock("../lib/brokerTelemetry", () => ({
     error: "",
     isLoading: false,
   }),
+  useTradeEvidenceFeed: () => ({
+    events: mockTradeEvidenceEvents,
+    error: "",
+    isLoading: false,
+  }),
 }));
 
 vi.mock("../lib/api", () => ({
@@ -89,6 +101,8 @@ vi.mock("../lib/api", () => ({
   fetchTradeEvents: vi.fn(),
   getAssetUrl: vi.fn((path) => path),
   openTrade: vi.fn(),
+  syncObservedTrade: vi.fn(),
+  updateTradeNote: vi.fn(),
   updateSessionSetup: vi.fn(),
   uploadScreenshot: vi.fn(),
 }));
@@ -156,9 +170,13 @@ describe("JournalPage close-trade recovery", () => {
     closeTrade.mockReset();
     createJournalEntry.mockReset();
     endSession.mockReset();
+    syncObservedTrade.mockReset();
+    updateTradeNote.mockReset();
     uploadScreenshot.mockReset();
     getPreSessionScreenshotState.mockReturnValue(null);
     getPreSessionScreenshotFile.mockReturnValue(null);
+    mockTradeEvidenceEvents = [];
+    mockObservedTradeEntries = [];
   });
 
   afterEach(() => {
@@ -366,5 +384,345 @@ describe("JournalPage close-trade recovery", () => {
     });
     expect(screen.getByText("Session detail")).toBeTruthy();
     expect(screen.getByText("Closed")).toBeTruthy();
+  });
+
+  it("keeps low-level diagnostics off the journal page and links to system status instead", async () => {
+    renderJournalPage();
+
+    expect(await screen.findByRole("button", { name: "System Status" })).toBeTruthy();
+    expect(screen.queryByText("Observed trade evidence")).toBeNull();
+    expect(screen.queryByText("TradingView activity")).toBeNull();
+    expect(screen.getByText("Journal log")).toBeTruthy();
+  });
+
+  it("syncs confirmed observed trades into persisted trade records and starts the reflection prompt", async () => {
+    const recentTimestamp = new Date().toISOString();
+    mockObservedTradeEntries = [
+      {
+        id: "observed-open-1",
+        observed_episode_id: "episode-open-1",
+        source: "observed",
+        event_type: "OPEN",
+        direction: "buy",
+        size: 1,
+        result_gbp: null,
+        note: null,
+        event_time: recentTimestamp,
+        symbol: "NAS100",
+      },
+    ];
+    mockTradeEvidenceEvents = [
+      {
+        event_id: "position-open-1",
+        event_type: "trade_position_opened",
+        occurred_at: recentTimestamp,
+        evidence_stage: "execution_confirmed",
+        side: "buy",
+        quantity: 1,
+      },
+    ];
+    syncObservedTrade.mockResolvedValue({
+      id: 501,
+      session_id: 1,
+      source: "observed",
+      reconciliation_state: "unmatched",
+      observed_episode_id: "episode-open-1",
+      event_type: "OPEN",
+      direction: "buy",
+      size: 1,
+      result_gbp: null,
+      note: null,
+      symbol: "NAS100",
+      event_time: recentTimestamp,
+    });
+
+    renderJournalPage();
+
+    await waitFor(() => {
+      expect(syncObservedTrade).toHaveBeenCalledWith("test-token", "1", {
+        observed_episode_id: "episode-open-1",
+        event_type: "OPEN",
+        symbol: "NAS100",
+        direction: "buy",
+        size: 1,
+        event_time: recentTimestamp,
+        result_gbp: null,
+        note: null,
+      });
+    });
+
+    expect(await screen.findByText(/\[TRADE OPEN\] \| symbol NAS100 \| buy \| 1 contract/i)).toBeTruthy();
+    expect(await screen.findByText("Why this trade?")).toBeTruthy();
+    expect(screen.queryByText(/observed via chart action/i)).toBeNull();
+  });
+
+  it("reuses the observed trade reflection flow instead of creating a duplicate manual trade", async () => {
+    const recentTimestamp = new Date().toISOString();
+    fetchTradeEvents.mockResolvedValue([
+      {
+        id: 601,
+        session_id: 1,
+        source: "observed",
+        reconciliation_state: "unmatched",
+        observed_episode_id: "episode-open-2",
+        event_type: "OPEN",
+        direction: "buy",
+        size: 1,
+        result_gbp: null,
+        note: null,
+        symbol: "NAS100",
+        event_time: recentTimestamp,
+      },
+    ]);
+    updateTradeNote.mockResolvedValue({
+      id: 601,
+      session_id: 1,
+      source: "observed",
+      reconciliation_state: "unmatched",
+      observed_episode_id: "episode-open-2",
+      event_type: "OPEN",
+      direction: "buy",
+      size: 1,
+      result_gbp: null,
+      note: "Momentum continuation after London open.",
+      symbol: "NAS100",
+      event_time: recentTimestamp,
+    });
+
+    const user = userEvent.setup();
+    renderJournalPage();
+
+    await screen.findByText("Trade Open");
+    await user.click(screen.getByRole("button", { name: "Trade Open" }));
+
+    expect(await screen.findByText("Why this trade?")).toBeTruthy();
+
+    const input = screen.getByRole("textbox");
+    await user.type(input, "Momentum continuation after London open.{Enter}");
+
+    await waitFor(() => {
+      expect(updateTradeNote).toHaveBeenCalledWith(
+        "test-token",
+        "1",
+        601,
+        "Momentum continuation after London open.",
+      );
+    });
+  });
+
+  it("reuses the observed add reflection flow instead of starting a new open workflow", async () => {
+    const recentTimestamp = new Date().toISOString();
+    fetchTradeEvents.mockResolvedValue([
+      {
+        id: 651,
+        session_id: 1,
+        source: "observed",
+        reconciliation_state: "unmatched",
+        observed_episode_id: "episode-add-1",
+        event_type: "ADD",
+        direction: "buy",
+        size: 1,
+        result_gbp: null,
+        note: null,
+        symbol: "NAS100",
+        event_time: recentTimestamp,
+      },
+    ]);
+    updateTradeNote.mockResolvedValue({
+      id: 651,
+      session_id: 1,
+      source: "observed",
+      reconciliation_state: "unmatched",
+      observed_episode_id: "episode-add-1",
+      event_type: "ADD",
+      direction: "buy",
+      size: 1,
+      result_gbp: null,
+      note: "Added after the retest held and momentum resumed.",
+      symbol: "NAS100",
+      event_time: recentTimestamp,
+    });
+
+    const user = userEvent.setup();
+    renderJournalPage();
+
+    await screen.findByText("Trade Open");
+    await user.click(screen.getByRole("button", { name: "Trade Open" }));
+
+    expect(await screen.findByText("Why this trade?")).toBeTruthy();
+    expect(screen.queryByText("Direction")).toBeNull();
+
+    const input = screen.getByRole("textbox");
+    await user.type(input, "Added after the retest held and momentum resumed.{Enter}");
+
+    await waitFor(() => {
+      expect(updateTradeNote).toHaveBeenCalledWith(
+        "test-token",
+        "1",
+        651,
+        "Added after the retest held and momentum resumed.",
+      );
+    });
+  });
+
+  it("reuses the observed close reflection flow instead of starting a duplicate close workflow", async () => {
+    const recentTimestamp = new Date().toISOString();
+    fetchTradeEvents.mockResolvedValue([
+      {
+        id: 701,
+        session_id: 1,
+        source: "observed",
+        reconciliation_state: "unmatched",
+        observed_episode_id: "episode-close-1",
+        event_type: "CLOSE",
+        direction: null,
+        size: 1,
+        result_gbp: 55,
+        note: null,
+        symbol: "NAS100",
+        event_time: recentTimestamp,
+      },
+    ]);
+    fetchPosition.mockResolvedValue({ current_open_size: 1 });
+    updateTradeNote.mockResolvedValue({
+      id: 701,
+      session_id: 1,
+      source: "observed",
+      reconciliation_state: "unmatched",
+      observed_episode_id: "episode-close-1",
+      event_type: "CLOSE",
+      direction: null,
+      size: 1,
+      result_gbp: 55,
+      note: "Closed into resistance after momentum stalled.",
+      symbol: "NAS100",
+      event_time: recentTimestamp,
+    });
+
+    const user = userEvent.setup();
+    renderJournalPage();
+
+    await screen.findByText("Trade Close");
+    await user.click(screen.getByRole("button", { name: "Trade Close" }));
+
+    expect(await screen.findByText("Why close here?")).toBeTruthy();
+    expect(screen.queryByText("Size closed")).toBeNull();
+
+    const input = screen.getByRole("textbox");
+    await user.type(input, "Closed into resistance after momentum stalled.{Enter}");
+
+    await waitFor(() => {
+      expect(updateTradeNote).toHaveBeenCalledWith(
+        "test-token",
+        "1",
+        701,
+        "Closed into resistance after momentum stalled.",
+      );
+    });
+
+    expect(closeTrade).not.toHaveBeenCalled();
+  });
+
+  it("reuses the observed reduce reflection flow instead of starting a duplicate close workflow", async () => {
+    const recentTimestamp = new Date().toISOString();
+    fetchTradeEvents.mockResolvedValue([
+      {
+        id: 751,
+        session_id: 1,
+        source: "observed",
+        reconciliation_state: "unmatched",
+        observed_episode_id: "episode-reduce-1",
+        event_type: "REDUCE",
+        direction: "buy",
+        size: 1,
+        result_gbp: 40,
+        note: null,
+        symbol: "NAS100",
+        event_time: recentTimestamp,
+      },
+    ]);
+    fetchPosition.mockResolvedValue({ current_open_size: 2 });
+    updateTradeNote.mockResolvedValue({
+      id: 751,
+      session_id: 1,
+      source: "observed",
+      reconciliation_state: "unmatched",
+      observed_episode_id: "episode-reduce-1",
+      event_type: "REDUCE",
+      direction: "buy",
+      size: 1,
+      result_gbp: 40,
+      note: "Trimmed one contract into the first resistance test.",
+      symbol: "NAS100",
+      event_time: recentTimestamp,
+    });
+
+    const user = userEvent.setup();
+    renderJournalPage();
+
+    await screen.findByText("Trade Close");
+    await user.click(screen.getByRole("button", { name: "Trade Close" }));
+
+    expect(await screen.findByText("Why close here?")).toBeTruthy();
+    expect(screen.queryByText("Size closed")).toBeNull();
+
+    const input = screen.getByRole("textbox");
+    await user.type(input, "Trimmed one contract into the first resistance test.{Enter}");
+
+    await waitFor(() => {
+      expect(updateTradeNote).toHaveBeenCalledWith(
+        "test-token",
+        "1",
+        751,
+        "Trimmed one contract into the first resistance test.",
+      );
+    });
+
+    expect(closeTrade).not.toHaveBeenCalled();
+  });
+
+  it("does not reuse a stale observed open after an intervening close", async () => {
+    const openTimestamp = new Date(Date.now() - 90_000).toISOString();
+    const closeTimestamp = new Date(Date.now() - 45_000).toISOString();
+
+    fetchTradeEvents.mockResolvedValue([
+      {
+        id: 801,
+        session_id: 1,
+        source: "observed",
+        reconciliation_state: "unmatched",
+        observed_episode_id: "episode-open-old",
+        event_type: "OPEN",
+        direction: "buy",
+        size: 1,
+        result_gbp: null,
+        note: null,
+        symbol: "NAS100",
+        event_time: openTimestamp,
+      },
+      {
+        id: 802,
+        session_id: 1,
+        source: "observed",
+        reconciliation_state: "unmatched",
+        observed_episode_id: "episode-close-old",
+        event_type: "CLOSE",
+        direction: null,
+        size: 1,
+        result_gbp: 20,
+        note: "Exited the first attempt.",
+        symbol: "NAS100",
+        event_time: closeTimestamp,
+      },
+    ]);
+
+    const user = userEvent.setup();
+    renderJournalPage();
+
+    await screen.findByText("Trade Open");
+    await user.click(screen.getByRole("button", { name: "Trade Open" }));
+
+    expect(await screen.findByText("Direction")).toBeTruthy();
+    expect(screen.queryByText("Why this trade?")).toBeNull();
   });
 });

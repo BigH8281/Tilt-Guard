@@ -16,7 +16,10 @@ from app.schemas.broker_telemetry import (
     BrokerTelemetryLatestResponse,
     BrokerTelemetrySystemEventListResponse,
     BrokerTelemetrySystemEventRead,
+    TradeEvidenceListResponse,
+    TradeEvidenceRead,
 )
+from app.services.session import get_open_session_for_user
 
 FRESH_TELEMETRY_WINDOW_SECONDS = 30
 STALE_TELEMETRY_WINDOW_SECONDS = 120
@@ -53,6 +56,28 @@ OBSERVATION_EVENT_TYPES = {
     "panel_maximize_control_visible",
     "snapshot_refreshed",
     "observation_gap",
+}
+TRADE_EVIDENCE_EVENT_TYPES = {
+    "trade_ticket_opened",
+    "trade_side_selected",
+    "trade_order_type_detected",
+    "trade_quantity_detected",
+    "trade_submit_clicked",
+    "trade_order_visible",
+    "trade_position_opened",
+    "trade_position_changed",
+    "trade_position_closed",
+    "trade_order_cancelled",
+    "trade_execution_unverified",
+    "chart_trade_control_visible",
+    "chart_trade_buy_clicked",
+    "chart_trade_sell_clicked",
+    "chart_long_tool_selected",
+    "chart_short_tool_selected",
+    "chart_position_tool_placed",
+    "chart_position_tool_modified",
+    "chart_position_tool_removed",
+    "chart_trade_execution_unverified",
 }
 
 
@@ -96,6 +121,22 @@ def _normalize_snapshot(snapshot: dict) -> dict:
                 "fxcm_footer_cluster_visible": snapshot.get("broker", {}).get("fxcm_footer_cluster_visible", False),
                 "anchor_summary": snapshot.get("broker", {}).get("anchor_summary") or {},
             },
+            "trade": {
+                "ticket_visible": snapshot.get("trade", {}).get("ticket_visible", False),
+                "order_visible": snapshot.get("trade", {}).get("order_visible", False),
+                "submit_control_visible": snapshot.get("trade", {}).get("submit_control_visible", False),
+                "cancel_control_visible": snapshot.get("trade", {}).get("cancel_control_visible", False),
+                "chart_trade_controls_visible": snapshot.get("trade", {}).get("chart_trade_controls_visible", False),
+                "chart_buy_control_visible": snapshot.get("trade", {}).get("chart_buy_control_visible", False),
+                "chart_sell_control_visible": snapshot.get("trade", {}).get("chart_sell_control_visible", False),
+                "selected_side": snapshot.get("trade", {}).get("selected_side"),
+                "order_type": snapshot.get("trade", {}).get("order_type"),
+                "quantity": snapshot.get("trade", {}).get("quantity"),
+                "price": snapshot.get("trade", {}).get("price"),
+                "position_size": snapshot.get("trade", {}).get("position_size"),
+                "position_side": snapshot.get("trade", {}).get("position_side"),
+                "visible_order_summary": snapshot.get("trade", {}).get("visible_order_summary"),
+            },
         }
 
     return {
@@ -116,6 +157,22 @@ def _normalize_snapshot(snapshot: dict) -> dict:
             "current_account_name": snapshot.get("current_account_name"),
             "fxcm_footer_cluster_visible": snapshot.get("fxcm_footer_cluster_visible", False),
             "anchor_summary": snapshot.get("anchor_summary") or {},
+        },
+        "trade": {
+            "ticket_visible": snapshot.get("ticket_visible", False),
+            "order_visible": snapshot.get("order_visible", False),
+            "submit_control_visible": snapshot.get("submit_control_visible", False),
+            "cancel_control_visible": snapshot.get("cancel_control_visible", False),
+            "chart_trade_controls_visible": snapshot.get("chart_trade_controls_visible", False),
+            "chart_buy_control_visible": snapshot.get("chart_buy_control_visible", False),
+            "chart_sell_control_visible": snapshot.get("chart_sell_control_visible", False),
+            "selected_side": snapshot.get("selected_side"),
+            "order_type": snapshot.get("order_type"),
+            "quantity": snapshot.get("quantity"),
+            "price": snapshot.get("price"),
+            "position_size": snapshot.get("position_size"),
+            "position_side": snapshot.get("position_side"),
+            "visible_order_summary": snapshot.get("visible_order_summary"),
         },
     }
 
@@ -205,6 +262,7 @@ def _record_internal_event(
     snapshot: dict,
     details: dict | None = None,
 ) -> None:
+    latest_extension_session = _get_latest_extension_session_for_user(db, user.id)
     db.add(
         BrokerTelemetryEvent(
             user_id=user.id,
@@ -214,6 +272,7 @@ def _record_internal_event(
             platform="tradingview",
             broker_adapter=broker_adapter,
             observation_key=f"extension-session:{broker_adapter}:{page_url}",
+            extension_session_key=latest_extension_session.session_key if latest_extension_session else None,
             page_url=page_url,
             page_title=page_title,
             occurred_at=datetime.utcnow(),
@@ -244,7 +303,49 @@ def _build_extension_snapshot(session: ExtensionSession) -> dict:
             "fxcm_footer_cluster_visible": payload.get("fxcm_footer_cluster_visible", False),
             "anchor_summary": payload.get("anchor_summary") or {},
         },
+        "trade": payload.get("trade") or {},
     }
+
+
+def _link_open_session(db: Session, user: User, event_symbol: str | None) -> int | None:
+    open_session = get_open_session_for_user(db, user.id)
+    if open_session is None:
+        return None
+
+    return open_session.id
+
+
+def _build_trade_evidence_details(
+    db: Session,
+    *,
+    user: User,
+    details: dict | None,
+    event_symbol: str | None,
+) -> tuple[dict, str | None, int | None]:
+    latest_extension_session = _get_latest_extension_session_for_user(db, user.id)
+    extension_session_key = latest_extension_session.session_key if latest_extension_session else None
+    open_session = get_open_session_for_user(db, user.id)
+    trading_session_id = _link_open_session(db, user, event_symbol)
+    session_symbol = open_session.symbol if open_session else None
+    symbol_mismatch = bool(session_symbol and event_symbol and session_symbol.upper() != event_symbol.upper())
+    next_details = {
+        **(details or {}),
+        "extension_session_key": extension_session_key,
+        "trading_session_id": trading_session_id,
+        "session_symbol": session_symbol,
+        "symbol_mismatch": symbol_mismatch,
+    }
+    return next_details, extension_session_key, trading_session_id
+
+
+def _get_latest_extension_session_for_user(db: Session, user_id: int) -> ExtensionSession | None:
+    statement = (
+        select(ExtensionSession)
+        .where(ExtensionSession.user_id == user_id)
+        .order_by(desc(ExtensionSession.last_heartbeat_at), desc(ExtensionSession.id))
+        .limit(1)
+    )
+    return db.scalar(statement)
 
 
 def record_extension_system_events(
@@ -418,6 +519,15 @@ def ingest_broker_telemetry_events(
             results.append(BrokerTelemetryIngestResult(event_id=event.event_id, status="duplicate"))
             continue
 
+        snapshot = event.snapshot.model_dump(mode="json")
+        event_symbol = ((snapshot.get("generic") or {}).get("current_symbol")) or ((event.details or {}).get("symbol"))
+        linked_details, extension_session_key, trading_session_id = _build_trade_evidence_details(
+            db,
+            user=user,
+            details=event.details,
+            event_symbol=event_symbol,
+        )
+
         stored_event = BrokerTelemetryEvent(
             user_id=user.id,
             event_id=event.event_id,
@@ -426,12 +536,14 @@ def ingest_broker_telemetry_events(
             platform=event.platform,
             broker_adapter=event.broker_adapter,
             observation_key=event.observation_key,
+            extension_session_key=extension_session_key,
+            trading_session_id=trading_session_id,
             page_url=event.page_url,
             page_title=event.page_title,
             occurred_at=event.occurred_at,
-            snapshot=event.snapshot.model_dump(mode="json"),
+            snapshot=snapshot,
             details={
-                **(event.details or {}),
+                **linked_details,
                 "tab_id": event.tab_id,
             },
         )
@@ -531,6 +643,7 @@ def list_broker_system_events(
     statement = (
         select(BrokerTelemetryEvent)
         .where(BrokerTelemetryEvent.user_id == user.id)
+        .where(BrokerTelemetryEvent.event_type.not_in(TRADE_EVIDENCE_EVENT_TYPES))
         .order_by(desc(BrokerTelemetryEvent.occurred_at), desc(BrokerTelemetryEvent.id))
         .limit(limit)
     )
@@ -554,3 +667,58 @@ def list_broker_system_events(
             )
         )
     return BrokerTelemetrySystemEventListResponse(events=mapped_events)
+
+
+def list_trade_evidence_events(
+    db: Session,
+    user: User,
+    *,
+    limit: int,
+    trading_session_id: int | None = None,
+    broker_adapter: str | None = None,
+) -> TradeEvidenceListResponse:
+    statement = (
+        select(BrokerTelemetryEvent)
+        .where(BrokerTelemetryEvent.user_id == user.id)
+        .where(BrokerTelemetryEvent.event_type.in_(TRADE_EVIDENCE_EVENT_TYPES))
+        .order_by(desc(BrokerTelemetryEvent.occurred_at), desc(BrokerTelemetryEvent.id))
+        .limit(limit)
+    )
+
+    if trading_session_id is not None:
+        statement = statement.where(BrokerTelemetryEvent.trading_session_id == trading_session_id)
+
+    if broker_adapter:
+        statement = statement.where(BrokerTelemetryEvent.broker_adapter == broker_adapter)
+
+    mapped_events: list[TradeEvidenceRead] = []
+    for event in db.scalars(statement):
+        details = event.details or {}
+        snapshot = _normalize_snapshot(dict(event.snapshot))
+        broker = snapshot.get("broker") or {}
+        generic = snapshot.get("generic") or {}
+        mapped_events.append(
+            TradeEvidenceRead(
+                id=event.id,
+                event_id=event.event_id,
+                event_type=event.event_type,
+                occurred_at=event.occurred_at,
+                broker_adapter=event.broker_adapter,
+                broker_profile=details.get("broker_profile") or broker.get("broker_label"),
+                symbol=details.get("symbol") or generic.get("current_symbol"),
+                side=details.get("side"),
+                order_type=details.get("order_type"),
+                quantity=details.get("quantity"),
+                price=details.get("price"),
+                confidence=float(details.get("confidence") or 0),
+                evidence_stage=details.get("evidence_stage") or "intent_observed",
+                raw_signal_summary=details.get("raw_signal_summary") or event.event_type.replace("_", " "),
+                extension_session_key=event.extension_session_key or details.get("extension_session_key"),
+                trading_session_id=event.trading_session_id or details.get("trading_session_id"),
+                page_url=event.page_url,
+                page_title=event.page_title,
+                details=details,
+            )
+        )
+
+    return TradeEvidenceListResponse(events=mapped_events)

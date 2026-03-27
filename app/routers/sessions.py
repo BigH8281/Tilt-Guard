@@ -9,9 +9,11 @@ from app.models.user import User
 from app.schemas.journal_entry import JournalEntryCreateRequest, JournalEntryRead
 from app.schemas.screenshot import ScreenshotRead
 from app.schemas.trade_event import (
+    ObservedTradeSyncRequest,
     SessionPositionRead,
     TradeCloseRequest,
     TradeEventRead,
+    TradeNoteUpdateRequest,
     TradeOpenRequest,
 )
 from app.schemas.trading_session import (
@@ -35,7 +37,7 @@ from app.services.session import (
     update_session_setup,
 )
 from app.services.screenshot import save_screenshot
-from app.services.trade import create_close_trade, create_open_trade, get_position_size
+from app.services.trade import create_close_trade, create_open_trade, get_position_size, update_trade_note, upsert_observed_trade
 
 
 router = APIRouter(prefix="/sessions", tags=["sessions"])
@@ -161,6 +163,7 @@ def open_trade(
             session=session,
             direction=payload.direction,
             size=payload.size,
+            symbol=payload.symbol,
             note=payload.note,
         )
     except ValueError as exc:
@@ -195,6 +198,7 @@ def close_trade(
             session=session,
             size=payload.size,
             result_gbp=payload.result_gbp,
+            symbol=payload.symbol,
             note=payload.note,
         )
     except ValueError as exc:
@@ -202,6 +206,54 @@ def close_trade(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=str(exc),
         ) from exc
+
+
+@router.post("/{session_id}/trade/observed", response_model=TradeEventRead, status_code=status.HTTP_201_CREATED)
+def sync_observed_trade(
+    session_id: int,
+    payload: ObservedTradeSyncRequest,
+    current_user: Annotated[User, Depends(get_current_user)],
+    db: Annotated[Session, Depends(get_db)],
+) -> TradeEventRead:
+    session = require_user_session(db, current_user.id, session_id)
+
+    try:
+        return upsert_observed_trade(
+            db=db,
+            session=session,
+            observed_episode_id=payload.observed_episode_id,
+            event_type=payload.event_type,
+            symbol=payload.symbol,
+            direction=payload.direction,
+            size=payload.size,
+            event_time=payload.event_time,
+            result_gbp=payload.result_gbp,
+            note=payload.note,
+        )
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(exc),
+        ) from exc
+
+
+@router.patch("/{session_id}/trade/{trade_event_id}/note", response_model=TradeEventRead)
+def patch_trade_note(
+    session_id: int,
+    trade_event_id: int,
+    payload: TradeNoteUpdateRequest,
+    current_user: Annotated[User, Depends(get_current_user)],
+    db: Annotated[Session, Depends(get_db)],
+) -> TradeEventRead:
+    session = require_user_session(db, current_user.id, session_id)
+    trade_event = next((event for event in session.trade_events if event.id == trade_event_id), None)
+    if trade_event is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Trade event not found.",
+        )
+
+    return update_trade_note(db=db, event=trade_event, note=payload.note)
 
 
 @router.get("/{session_id}/screenshots", response_model=list[ScreenshotRead])

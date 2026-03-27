@@ -34,6 +34,7 @@
         "src/shared/brokerSignature.js",
         "src/shared/adapters.js",
         "src/content/domState.js",
+        "src/content/trade-evidence.js",
         "src/content/observer.js",
         "src/content/index.js"
       ],

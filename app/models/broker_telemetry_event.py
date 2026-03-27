@@ -1,7 +1,7 @@
 from datetime import datetime
 from typing import TYPE_CHECKING, Any
 
-from sqlalchemy import JSON, DateTime, ForeignKey, String, Text
+from sqlalchemy import JSON, DateTime, ForeignKey, Integer, String, Text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.db import Base
@@ -21,6 +21,8 @@ class BrokerTelemetryEvent(Base):
     platform: Mapped[str] = mapped_column(String(32), nullable=False, default="tradingview")
     broker_adapter: Mapped[str] = mapped_column(String(32), nullable=False, default="tradingview_base")
     observation_key: Mapped[str] = mapped_column(String(255), nullable=False, index=True)
+    extension_session_key: Mapped[str | None] = mapped_column(String(36), nullable=True, index=True)
+    trading_session_id: Mapped[int | None] = mapped_column(Integer, ForeignKey("trading_sessions.id"), nullable=True, index=True)
     page_url: Mapped[str] = mapped_column(Text, nullable=False)
     page_title: Mapped[str] = mapped_column(Text, nullable=False)
     occurred_at: Mapped[datetime] = mapped_column(DateTime, nullable=False)

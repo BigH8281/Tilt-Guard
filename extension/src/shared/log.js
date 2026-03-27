@@ -1,14 +1,22 @@
 const PREFIX = "[tilt-guard]";
 
 export function createLogger(scope) {
+  function stringifyContext(context) {
+    const entries = Object.entries(context || {}).filter(([, value]) => value !== undefined);
+    if (!entries.length) {
+      return "";
+    }
+
+    try {
+      return ` ${JSON.stringify(Object.fromEntries(entries))}`;
+    } catch {
+      return ` ${String(context)}`;
+    }
+  }
+
   function log(level, message, context = {}) {
-    const payload = {
-      scope,
-      message,
-      ...context,
-    };
     const method = console[level] || console.log;
-    method(PREFIX, payload);
+    method(`${PREFIX} ${scope}:${message}${stringifyContext(context)}`);
   }
 
   return {

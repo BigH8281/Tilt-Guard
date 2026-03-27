@@ -3,6 +3,32 @@ import { forwardRef } from "react";
 import { getAssetUrl } from "../lib/api";
 import { formatCurrency, formatTime, isImageFile } from "../lib/format";
 
+function getTradeEventLabel(eventType) {
+  switch (eventType) {
+    case "ADD":
+      return "[TRADE ADD]";
+    case "REDUCE":
+      return "[TRADE REDUCE]";
+    case "CLOSE":
+      return "[TRADE CLOSE]";
+    default:
+      return "[TRADE OPEN]";
+  }
+}
+
+function getTradeEventBadge(eventType) {
+  switch (eventType) {
+    case "ADD":
+      return "ADD";
+    case "REDUCE":
+      return "REDUCE";
+    case "CLOSE":
+      return "CLOSE";
+    default:
+      return "OPEN";
+  }
+}
+
 function renderPersistedLine(item) {
   if (item.type === "journal") {
     const setupMatch = item.payload.content.match(/^\[SETUP\]\[(.+?)\]\s*(.+)$/);
@@ -40,10 +66,16 @@ function renderPersistedLine(item) {
     };
   }
 
-  if (item.type === "trade") {
+  if (item.type === "trade" || item.type === "observed_trade") {
+    const isObserved =
+      item.type === "observed_trade" || item.payload.source === "observed" || item.payload.source === "merged";
     const parts = [
-      item.payload.event_type === "OPEN" ? "[TRADE OPEN]" : "[TRADE CLOSE]",
+      getTradeEventLabel(item.payload.event_type),
     ];
+
+    if (item.payload.symbol) {
+      parts.push(`symbol ${item.payload.symbol}`);
+    }
 
     if (item.payload.direction) {
       parts.push(item.payload.direction);
@@ -59,10 +91,16 @@ function renderPersistedLine(item) {
       parts.push(`note: ${item.payload.note}`);
     }
 
+    if (isObserved && item.payload.symbol_mismatch && item.payload.session_symbol) {
+      parts.push(`session opened on ${item.payload.session_symbol}`);
+    }
+
     return {
-      key: `trade-${item.payload.id}`,
+      key: `${isObserved ? "observed-trade" : "trade"}-${item.payload.id}`,
       timestamp: item.payload.event_time,
-      badge: item.payload.event_type === "OPEN" ? "OPEN" : "CLOSE",
+      badge: getTradeEventBadge(item.payload.event_type),
+      badgeTone: isObserved ? "setup-meta" : null,
+      lineClass: isObserved ? "observed-trade-line" : null,
       text: parts.join(" | "),
     };
   }

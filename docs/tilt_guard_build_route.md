@@ -36,8 +36,9 @@ This creates the following hard constraints:
 - Core product access must work in a browser
 - Core product must be accessible from anywhere
 - Core product must not depend on installing Electron or desktop apps
-- Trading integration must assume Tradovate Web in the browser
-- TradingView should be assumed browser-based for core workflows
+- Trading integration must assume browser-based charting and broker workflows
+- Current extension implementation is TradingView-first
+- Broker-specific expansion later must preserve the browser-first constraint
 - Mobile and tablet access should remain possible
 
 Because of this, Tilt-Guard must be built **web-first**, not desktop-first.
@@ -57,9 +58,12 @@ Tilt-Guard must follow this architecture direction:
 - Hosted screenshot/file storage
 
 ### Trading integration
-- Browser extension for Tradovate Web integration
-- Extension streams trade/account/order events to backend
+- Browser extension for browser-based trading/chart telemetry
+- Current telemetry slice is TradingView-first
+- Extension/web/backend split should preserve a simple "sign in once, connect extension, then it just works" experience
+- Extension streams trade/account/order/session events to backend
 - Backend becomes the source of truth for captured behaviour
+- Broker/platform specialization should sit under a TradingView-first adapter layer rather than scattering broker logic everywhere
 
 ### Intelligence layer
 - Backend rules engine
@@ -114,21 +118,35 @@ Does **not** include:
 - local model installation
 - Electron dependency
 
-### Phase 2 — Tradovate Extension Telemetry
+### Phase 2 — Browser Extension Telemetry
 Goal:
-- capture trade behaviour automatically from Tradovate Web
+- capture trade behaviour automatically from browser-based trading surfaces
 
 Includes:
 - browser extension
-- Tradovate tab/session detection
+- hosted auth/connect flow for the extension
+- browser tab/session detection
 - event capture
 - event streaming to backend
+- extension session lifecycle and backend heartbeat
+- broker adapter/profile matching
+- backend system feed for extension-observed state changes
 - linking captured trade events to live journal sessions
 - automatic trade timeline population
+- chart-first confirmation from visible TradingView chart surfaces where the browser surface genuinely supports it
+- confirmed observed trade persistence into the journal with shared reflection flow
+- session-wide confirmed trade attachment even across symbol changes
+- keeping provenance, mismatch context, and reconciliation detail out of the main journal
 
 Priority:
 - reliability over cleverness
 - observation before enforcement
+- resilient monitoring over brittle DOM-only triggers
+
+Current working rule inside Phase 2:
+- primary confirmation source is the visible on-chart TradingView confirmation surface
+- `Positions` and other broker/account surfaces are supporting evidence only
+- manual trade entry remains fallback where confirmation is incomplete or ambiguous
 
 ### Phase 3 — Rules Engine v1
 Goal:
@@ -220,7 +238,7 @@ Tilt-Guard should evolve through these truth layers:
 What the trader says they thought, planned, and felt
 
 ### Layer 2 — Broker truth
-What Tradovate data shows actually happened
+What browser-captured broker/platform telemetry shows actually happened
 
 ### Layer 3 — Rules truth
 What the system determines was compliant or non-compliant
@@ -231,6 +249,11 @@ What the system infers about tilt, emotional state, or discipline breakdown
 These layers must not be confused.
 
 Interpretation must not overrule verified broker facts.
+
+For the current Tilt-Guard implementation:
+- confirmed observed browser/platform facts are the practical factual source of truth for trade fields
+- manual input remains the source of truth for reflection, rationale, psychology, and fallback gaps
+- provenance and reconciliation detail belong in `System Status`, not the main journal
 
 ---
 
@@ -249,20 +272,42 @@ All contributors, including AI coding agents, must follow these rules:
 9. If a proposed change conflicts with this build route, stop and prefer this document  
 10. Ask: “Does this help the current phase, or is it leaking into a later phase?”
 
+Additional rules from the current extension work:
+11. Keep system/platform activity separate from the trader's main journal content
+12. Do not label stale/degraded monitoring as offline unless connectivity is actually gone
+13. Keep live session metadata such as the current symbol in shared live-state UI, not as journal clutter
+14. Do not rely on TradingView page refresh as a normal monitoring strategy
+
 ---
 
 ## 9) Current Position
 
-Tilt-Guard is currently at the start of **Phase 1 — Hosted Journal MVP**.
+Tilt-Guard is currently in **late Phase 1 / active Phase 2 foundation work**.
+
+What is now true in the repo:
+- the hosted journal MVP exists with auth, sessions, screenshots, history, and manual trade fallback
+- the backend is deployed on Railway and serves a hosted `/extension/connect` page
+- a single unpacked browser extension now exists with `Hosted` / `Local` switching
+- the extension can authenticate against the hosted backend, maintain extension session state, and ingest broker telemetry
+- backend APIs now include extension session lifecycle and broker telemetry feed endpoints
+- current extension hardening has already taught us important real-world lessons about stale state, symbol propagation, and observer starvation under TradingView mutation storms
+
+What is not yet true:
+- broker telemetry is not yet proven as the final authoritative trade history source
+- rules truth, enforcement, and AI interpretation are not implemented
+- telemetry coverage is TradingView-first, not a finished multi-broker/browser integration layer
 
 Immediate objective:
-- take the existing journal that works locally
-- make it available online
-- make it stable and accessible from anywhere
-- preserve manual trade recording as fallback for now
+- stabilize the hosted extension telemetry slice
+- validate the hosted extension rollout and connection UX for real remote users
+- improve telemetry reliability and broker/profile coverage before any rules-engine work
+- preserve manual trade recording as the fallback until broker truth is genuinely trustworthy
+- preserve and re-read the recorded product/architecture lessons before expanding into more broker-specific work
 
 Immediate success condition:
-- the user can run the journal fully in a browser from work, home, tablet, or phone
+- the user can run the journal in a browser from anywhere
+- the user can load one extension, connect it to the hosted backend, and see reliable TradingView-first monitoring state
+- the project can move into rules planning without needing to revisit the core hosted/browser-first delivery choice
 
 ---
 
@@ -287,6 +332,9 @@ This file should be used alongside:
 
 - `status.md`  
   Current implementation status and what is done / in progress / next
+
+- `docs/tilt_guard_product_learning_log.md`
+  Retained product and technical lessons from the Drop-Trades / TradeGuard review and our own extension implementation/debugging work
 
 - task-specific briefs  
   The exact development step being worked on now

@@ -8,6 +8,7 @@ import { AuthPage } from "./pages/AuthPage";
 import { DashboardPage } from "./pages/DashboardPage";
 import { ExtensionConnectPage } from "./pages/ExtensionConnectPage";
 import { JournalPage } from "./pages/JournalPage";
+import { SystemStatusPage } from "./pages/SystemStatusPage";
 
 function ProtectedRoute({ children }) {
   const { authFailureReason, isAuthenticated, isBootstrapping } = useAuth();
@@ -53,6 +54,16 @@ export default function App() {
           <ProtectedRoute>
             <AppShell>
               <JournalPage />
+            </AppShell>
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/sessions/:sessionId/system-status"
+        element={
+          <ProtectedRoute>
+            <AppShell>
+              <SystemStatusPage />
             </AppShell>
           </ProtectedRoute>
         }

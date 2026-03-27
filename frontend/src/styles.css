@@ -1070,6 +1070,21 @@ body.journal-shell-minimized .topbar {
   animation: spin 900ms linear infinite;
 }
 
+.system-status-page {
+  gap: 1rem;
+}
+
+.system-status-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+  gap: 0.85rem;
+}
+
+.observed-trade-line {
+  background: linear-gradient(90deg, rgba(126, 204, 255, 0.1), rgba(255, 255, 255, 0));
+  border-radius: 14px;
+}
+
 @keyframes spin {
   to {
     transform: rotate(360deg);
@@ -1091,7 +1106,8 @@ body.journal-shell-minimized .topbar {
 
 @media (max-width: 1180px) {
   .status-strip,
-  .journal-workbench.with-side-panel {
+  .journal-workbench.with-side-panel,
+  .system-status-grid {
     grid-template-columns: 1fr;
   }
 

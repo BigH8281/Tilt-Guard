@@ -1,5 +1,25 @@
-function canTalkToExtension() {
+export function canTalkToExtension() {
   return typeof window !== "undefined" && Boolean(window.chrome?.runtime?.sendMessage);
+}
+
+export function shouldResyncExtensionAuth({
+  extensionSession,
+  hasExtensionMessaging,
+  lastAttemptAt = 0,
+  now = Date.now(),
+  cooldownMs = 15_000,
+}) {
+  if (!hasExtensionMessaging || !extensionSession?.extension_id) {
+    return false;
+  }
+
+  const status = extensionSession.status || "";
+  const isRecoverableStatus = status === "offline" || status === "disconnected";
+  if (!isRecoverableStatus) {
+    return false;
+  }
+
+  return now - lastAttemptAt >= cooldownMs;
 }
 
 export async function syncExtensionAuth({ extensionId, accessToken, userEmail }) {

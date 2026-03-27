@@ -12,10 +12,12 @@ from app.schemas.broker_telemetry import (
     BrokerTelemetryEventListResponse,
     BrokerTelemetryLatestResponse,
     BrokerTelemetrySystemEventListResponse,
+    TradeEvidenceListResponse,
 )
 from app.services.broker_telemetry import (
     get_latest_broker_telemetry,
     ingest_broker_telemetry_events,
+    list_trade_evidence_events,
     list_broker_system_events,
     list_broker_telemetry_events,
 )
@@ -61,6 +63,23 @@ def get_broker_system_events(
     limit: int = Query(default=20, ge=1, le=100),
 ) -> BrokerTelemetrySystemEventListResponse:
     return list_broker_system_events(db=db, user=current_user, limit=limit)
+
+
+@router.get("/trade-evidence", response_model=TradeEvidenceListResponse)
+def get_trade_evidence_events(
+    current_user: Annotated[User, Depends(get_current_user)],
+    db: Annotated[Session, Depends(get_db)],
+    limit: int = Query(default=20, ge=1, le=100),
+    trading_session_id: int | None = Query(default=None),
+    broker_adapter: str | None = Query(default=None),
+) -> TradeEvidenceListResponse:
+    return list_trade_evidence_events(
+        db=db,
+        user=current_user,
+        limit=limit,
+        trading_session_id=trading_session_id,
+        broker_adapter=broker_adapter,
+    )
 
 
 @router.post("/ingest", response_model=BrokerTelemetryBatchIngestResponse, status_code=status.HTTP_202_ACCEPTED)

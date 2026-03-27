@@ -209,6 +209,28 @@ export function closeTrade(token, sessionId, payload) {
   });
 }
 
+export function syncObservedTrade(token, sessionId, payload) {
+  return request(`/sessions/${sessionId}/trade/observed`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      ...authHeaders(token),
+    },
+    body: JSON.stringify(payload),
+  });
+}
+
+export function updateTradeNote(token, sessionId, tradeEventId, note) {
+  return request(`/sessions/${sessionId}/trade/${tradeEventId}/note`, {
+    method: "PATCH",
+    headers: {
+      "Content-Type": "application/json",
+      ...authHeaders(token),
+    },
+    body: JSON.stringify({ note }),
+  });
+}
+
 export function fetchPosition(token, sessionId) {
   return request(`/sessions/${sessionId}/position`, {
     headers: authHeaders(token),
@@ -231,6 +253,22 @@ export async function fetchLatestBrokerTelemetry(token) {
 
 export async function fetchBrokerSystemFeed(token, limit = 20) {
   const response = await request(`/broker-telemetry/system-feed?limit=${limit}`, {
+    headers: authHeaders(token),
+  });
+
+  return response.events;
+}
+
+export async function fetchTradeEvidenceFeed(token, { limit = 20, tradingSessionId = null, brokerAdapter = null } = {}) {
+  const params = new URLSearchParams({ limit: String(limit) });
+  if (tradingSessionId) {
+    params.set("trading_session_id", String(tradingSessionId));
+  }
+  if (brokerAdapter) {
+    params.set("broker_adapter", brokerAdapter);
+  }
+
+  const response = await request(`/broker-telemetry/trade-evidence?${params.toString()}`, {
     headers: authHeaders(token),
   });
 

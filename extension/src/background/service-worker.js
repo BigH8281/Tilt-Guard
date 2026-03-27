@@ -1,4 +1,7 @@
+import { AUTH_RECOVERY_QUEUE_EVENTS, isAuthFailureStatus, trimQueueForAuthRecovery } from "./auth-recovery.js";
 import { TELEMETRY_STALE_AFTER_MS, deriveExtensionRuntime } from "./extension-state.js";
+import { isQuotaExceededError, limitTelemetryQueue } from "./queue-policy.js";
+import { needsRecoveryProbe } from "./runtime-recovery.js";
 import { createLogger } from "../shared/log.js";
 import {
   EXTENSION_MODES,
@@ -22,6 +25,8 @@ const FLUSH_ALARM = "telemetry-flush";
 const HEARTBEAT_ALARM = "extension-session-heartbeat";
 const TRADINGVIEW_URL_PATTERN = "https://www.tradingview.com/chart/*";
 const EXTENSION_VERSION = chrome.runtime.getManifest().version;
+const RECOVERY_PROBE_DELAY_MS = 750;
+let bootstrapPromise = null;
 
 function buildIngestUrl(apiBaseUrl) {
   return `${apiBaseUrl.replace(/\/$/, "")}/broker-telemetry/ingest`;
@@ -33,18 +38,63 @@ function buildExtensionSessionUrl(apiBaseUrl, path) {
 
 async function getQueue() {
   const stored = await getStorage([STORAGE_KEYS.telemetryQueue]);
-  return stored[STORAGE_KEYS.telemetryQueue] || [];
+  const queue = stored[STORAGE_KEYS.telemetryQueue] || [];
+  const normalisedQueue = limitTelemetryQueue(queue);
+  if (normalisedQueue.length !== queue.length) {
+    await setStorage({ [STORAGE_KEYS.telemetryQueue]: normalisedQueue });
+    logger.warn("telemetry_queue_trimmed_on_read", {
+      retained: normalisedQueue.length,
+      previousSize: queue.length,
+    });
+  }
+  return normalisedQueue;
 }
 
 async function setQueue(queue) {
-  await setStorage({ [STORAGE_KEYS.telemetryQueue]: queue });
+  await setStorage({ [STORAGE_KEYS.telemetryQueue]: limitTelemetryQueue(queue) });
+}
+
+async function expireExtensionAuth(reason, { retainQueue = true } = {}) {
+  const currentQueue = retainQueue ? await getQueue() : [];
+  const retainedQueue = retainQueue ? trimQueueForAuthRecovery(currentQueue) : [];
+  await setStorage({
+    [STORAGE_KEYS.authToken]: "",
+    [STORAGE_KEYS.authUserEmail]: "",
+    [STORAGE_KEYS.authSyncedAt]: "",
+    [STORAGE_KEYS.extensionSessionKey]: "",
+    [STORAGE_KEYS.extensionSessionStatus]: "",
+    [STORAGE_KEYS.telemetryQueue]: retainedQueue,
+    [STORAGE_KEYS.lastFlushOutcome]: "failed",
+    [STORAGE_KEYS.lastFlushStatusCode]: null,
+    [STORAGE_KEYS.lastError]: reason,
+  });
+  await deriveAndPersistRuntimeState({ preserveSessionStatus: false });
+  logger.warn("extension_auth_expired", {
+    reason,
+    retainedQueue: retainedQueue.length,
+    retainedLimit: AUTH_RECOVERY_QUEUE_EVENTS,
+  });
 }
 
 async function appendEvents(events) {
   const queue = await getQueue();
-  const nextQueue = [...queue, ...events];
-  await setQueue(nextQueue);
-  return nextQueue;
+  let nextQueue = limitTelemetryQueue([...queue, ...events]);
+
+  while (true) {
+    try {
+      await setQueue(nextQueue);
+      return nextQueue;
+    } catch (error) {
+      if (!isQuotaExceededError(error) || nextQueue.length <= events.length) {
+        throw error;
+      }
+
+      nextQueue = nextQueue.slice(Math.ceil(nextQueue.length / 2));
+      logger.warn("telemetry_queue_trimmed_after_quota_error", {
+        retained: nextQueue.length,
+      });
+    }
+  }
 }
 
 async function setFlushState(partialState) {
@@ -118,6 +168,49 @@ async function scanTradingViewTabs() {
     [STORAGE_KEYS.tabScanCompletedAt]: new Date().toISOString(),
   });
   return { tabs, activeTab };
+}
+
+async function probeTradingViewTab(tabId, reason = "background_probe") {
+  if (!tabId) {
+    return { ok: false, skipped: true, reason: "missing_tab_id" };
+  }
+
+  try {
+    const response = await chrome.tabs.sendMessage(tabId, {
+      type: "telemetry:collect-now",
+      reason,
+    });
+    logger.info("telemetry_probe_sent", { tabId, reason });
+    return { ok: true, response };
+  } catch (error) {
+    logger.info("telemetry_probe_skipped", {
+      tabId,
+      reason,
+      error: String(error),
+    });
+    return { ok: false, error: String(error) };
+  }
+}
+
+async function probeTradingViewTabs(trigger = "background_probe") {
+  const { tabs, activeTab } = await scanTradingViewTabs();
+  if (!tabs.length) {
+    return { ok: false, skipped: true, reason: "no_tradingview_tabs" };
+  }
+
+  const orderedTabs = [
+    ...(activeTab ? [activeTab] : []),
+    ...tabs.filter((tab) => tab.id !== activeTab?.id),
+  ];
+
+  for (const tab of orderedTabs) {
+    const result = await probeTradingViewTab(tab.id, trigger);
+    if (result.ok) {
+      return { ok: true, tabId: tab.id };
+    }
+  }
+
+  return { ok: false, skipped: true, reason: "no_content_listener" };
 }
 
 function buildSnapshotContext(status) {
@@ -239,6 +332,7 @@ function buildExtensionSessionPayload({ runtime, effectiveWarning, settings, sta
       panel_maximize_control_visible: snapshot?.generic?.panel_maximize_control_visible || false,
       anchor_summary: snapshot?.broker?.anchor_summary || {},
       fxcm_footer_cluster_visible: snapshot?.broker?.fxcm_footer_cluster_visible || false,
+      trade: snapshot?.trade || {},
       telemetry_updated_at: state[STORAGE_KEYS.lastKnownStatus]?.updatedAt || null,
       app_base_url: settings.appBaseUrl,
       api_base_url: settings.apiBaseUrl,
@@ -271,6 +365,9 @@ async function syncExtensionSession(trigger = "manual") {
 
     if (!response.ok) {
       const errorText = await response.text();
+      if (isAuthFailureStatus(response.status)) {
+        await expireExtensionAuth(`http_${response.status}:${errorText || "invalid_auth"}`);
+      }
       throw new Error(`${response.status}:${errorText || "request_failed"}`);
     }
 
@@ -380,6 +477,9 @@ async function flushQueue(trigger = "unknown") {
   if (!response.ok) {
     const errorText = await response.text();
     const errorMessage = `http_${response.status}:${errorText || "empty_response"}`;
+    if (isAuthFailureStatus(response.status)) {
+      await expireExtensionAuth(errorMessage);
+    }
     await setFlushState({
       [STORAGE_KEYS.lastFlushOutcome]: "failed",
       [STORAGE_KEYS.lastFlushStatusCode]: response.status,
@@ -409,6 +509,46 @@ async function refreshRuntimeState(trigger = "runtime_refresh", { syncSession = 
     await syncExtensionSession(trigger);
   }
   return runtimeState;
+}
+
+async function bootstrapRuntime(trigger = "service_worker_bootstrap") {
+  if (bootstrapPromise) {
+    return bootstrapPromise;
+  }
+
+  bootstrapPromise = (async () => {
+    await ensureModeSettings();
+    await ensureAlarms();
+    await scanTradingViewTabs();
+
+    let runtimeState = await deriveAndPersistRuntimeState();
+    const shouldProbe = needsRecoveryProbe({
+      isAuthenticated: Boolean(runtimeState.settings.authToken),
+      hasCompletedTabScan: Boolean(runtimeState.state[STORAGE_KEYS.tabScanCompletedAt]),
+      hasTradingViewTab: (runtimeState.state[STORAGE_KEYS.tradingViewTabCount] ?? 0) > 0,
+      lastKnownUpdatedAt: runtimeState.state[STORAGE_KEYS.lastKnownStatus]?.updatedAt || "",
+      extensionSessionStatus: runtimeState.state[STORAGE_KEYS.extensionSessionStatus] || "",
+    });
+
+    if (shouldProbe) {
+      await probeTradingViewTabs(`${trigger}_probe`);
+      await new Promise((resolve) => setTimeout(resolve, RECOVERY_PROBE_DELAY_MS));
+      await scanTradingViewTabs();
+      runtimeState = await deriveAndPersistRuntimeState();
+    }
+
+    if (runtimeState.settings.authToken && isAbsoluteHttpUrl(runtimeState.settings.apiBaseUrl)) {
+      await syncExtensionSession(trigger);
+    }
+
+    return runtimeState;
+  })();
+
+  try {
+    return await bootstrapPromise;
+  } finally {
+    bootstrapPromise = null;
+  }
 }
 
 async function clearAuthState() {
@@ -475,58 +615,54 @@ async function switchMode(nextMode) {
 }
 
 chrome.runtime.onInstalled.addListener(async () => {
-  await ensureModeSettings();
-  await ensureAlarms();
-  await refreshRuntimeState("installed");
+  await bootstrapRuntime("installed");
 });
 
 chrome.runtime.onStartup.addListener(async () => {
-  await ensureModeSettings();
-  await ensureAlarms();
-  await refreshRuntimeState("startup");
+  await bootstrapRuntime("startup");
 });
 
+void bootstrapRuntime("service_worker_loaded");
+
 chrome.tabs.onUpdated.addListener(() => {
-  void refreshRuntimeState("tabs_updated", { syncSession: false });
+  void bootstrapRuntime("tabs_updated");
 });
 chrome.tabs.onRemoved.addListener(() => {
-  void refreshRuntimeState("tabs_removed", { syncSession: false });
+  void bootstrapRuntime("tabs_removed");
 });
 chrome.tabs.onActivated.addListener(() => {
-  void refreshRuntimeState("tabs_activated", { syncSession: false });
+  void bootstrapRuntime("tabs_activated");
 });
 
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   if (message?.type === "telemetry:observed") {
+    sendResponse({ ok: true, accepted: true });
     void (async () => {
-      const queue = await appendEvents(message.payload.events);
-      await setStorage({
-        [STORAGE_KEYS.lastKnownStatus]: {
-          pageUrl: message.payload.pageUrl,
-          pageTitle: message.payload.pageTitle,
-          snapshot: message.payload.snapshot,
-          adapter: message.payload.adapter,
-          queued: queue.length,
-          tabId: sender.tab?.id || null,
-          updatedAt: new Date().toISOString(),
-        },
-      });
-      await refreshRuntimeState("telemetry_observed");
-
       try {
+        const queue = await appendEvents(message.payload.events);
+        await setStorage({
+          [STORAGE_KEYS.lastKnownStatus]: {
+            pageUrl: message.payload.pageUrl,
+            pageTitle: message.payload.pageTitle,
+            snapshot: message.payload.snapshot,
+            adapter: message.payload.adapter,
+            queued: queue.length,
+            tabId: sender.tab?.id || null,
+            updatedAt: new Date().toISOString(),
+          },
+        });
+        await refreshRuntimeState("telemetry_observed");
         await flushQueue("enqueue");
       } catch (error) {
-        logger.warn("flush_failed_after_enqueue", { error: String(error) });
+        logger.warn("telemetry_observed_failed", { error: String(error) });
       }
-
-      sendResponse({ ok: true });
     })();
-    return true;
+    return false;
   }
 
   if (message?.type === "telemetry:get-status") {
     void (async () => {
-      await refreshRuntimeState("popup_status", { syncSession: false });
+      await bootstrapRuntime("popup_status");
       const [queue, settings, state] = await Promise.all([
         getQueue(),
         getSettings(),
@@ -609,7 +745,7 @@ chrome.runtime.onMessageExternal.addListener((message, sender, sendResponse) => 
         [STORAGE_KEYS.authUserEmail]: message.payload.userEmail || "",
         [STORAGE_KEYS.authSyncedAt]: new Date().toISOString(),
       });
-      await refreshRuntimeState("external_auth_sync");
+      await bootstrapRuntime("external_auth_sync");
 
       try {
         await flushQueue("external_auth_sync");
@@ -647,7 +783,7 @@ chrome.alarms.onAlarm.addListener((alarm) => {
   }
 
   if (alarm.name === HEARTBEAT_ALARM) {
-    void refreshRuntimeState("heartbeat_alarm").catch((error) => {
+    void bootstrapRuntime("heartbeat_alarm").catch((error) => {
       logger.warn("heartbeat_refresh_failed", { error: String(error) });
     });
   }

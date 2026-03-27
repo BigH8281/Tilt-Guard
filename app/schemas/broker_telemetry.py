@@ -25,6 +25,26 @@ BrokerTelemetryEventType = Literal[
     "panel_maximize_control_visible",
     "snapshot_refreshed",
     "observation_gap",
+    "trade_ticket_opened",
+    "trade_side_selected",
+    "trade_order_type_detected",
+    "trade_quantity_detected",
+    "trade_submit_clicked",
+    "trade_order_visible",
+    "trade_position_opened",
+    "trade_position_changed",
+    "trade_position_closed",
+    "trade_order_cancelled",
+    "trade_execution_unverified",
+    "chart_trade_control_visible",
+    "chart_trade_buy_clicked",
+    "chart_trade_sell_clicked",
+    "chart_long_tool_selected",
+    "chart_short_tool_selected",
+    "chart_position_tool_placed",
+    "chart_position_tool_modified",
+    "chart_position_tool_removed",
+    "chart_trade_execution_unverified",
 ]
 
 
@@ -59,9 +79,27 @@ class BrokerEnrichmentSnapshot(BaseModel):
     anchor_summary: BrokerAnchorSummary = Field(default_factory=BrokerAnchorSummary)
 
 
+class TradeEvidenceSnapshot(BaseModel):
+    ticket_visible: bool = False
+    order_visible: bool = False
+    submit_control_visible: bool = False
+    cancel_control_visible: bool = False
+    chart_trade_controls_visible: bool = False
+    chart_buy_control_visible: bool = False
+    chart_sell_control_visible: bool = False
+    selected_side: str | None = None
+    order_type: str | None = None
+    quantity: float | None = None
+    price: float | None = None
+    position_size: float | None = None
+    position_side: str | None = None
+    visible_order_summary: str | None = None
+
+
 class BrokerDomSnapshot(BaseModel):
     generic: TradingViewGenericSnapshot
     broker: BrokerEnrichmentSnapshot = Field(default_factory=BrokerEnrichmentSnapshot)
+    trade: TradeEvidenceSnapshot = Field(default_factory=TradeEvidenceSnapshot)
 
     @model_validator(mode="before")
     @classmethod
@@ -87,6 +125,22 @@ class BrokerDomSnapshot(BaseModel):
                 "current_account_name": value.get("current_account_name"),
                 "fxcm_footer_cluster_visible": value.get("fxcm_footer_cluster_visible", False),
                 "anchor_summary": value.get("anchor_summary") or {},
+            },
+            "trade": {
+                "ticket_visible": value.get("ticket_visible", False),
+                "order_visible": value.get("order_visible", False),
+                "submit_control_visible": value.get("submit_control_visible", False),
+                "cancel_control_visible": value.get("cancel_control_visible", False),
+                "chart_trade_controls_visible": value.get("chart_trade_controls_visible", False),
+                "chart_buy_control_visible": value.get("chart_buy_control_visible", False),
+                "chart_sell_control_visible": value.get("chart_sell_control_visible", False),
+                "selected_side": value.get("selected_side"),
+                "order_type": value.get("order_type"),
+                "quantity": value.get("quantity"),
+                "price": value.get("price"),
+                "position_size": value.get("position_size"),
+                "position_side": value.get("position_side"),
+                "visible_order_summary": value.get("visible_order_summary"),
             },
         }
 
@@ -126,6 +180,8 @@ class BrokerTelemetryEventDebugRead(BaseModel):
     event_type: BrokerTelemetryEventType
     broker_adapter: str
     observation_key: str
+    extension_session_key: str | None = None
+    trading_session_id: int | None = None
     occurred_at: datetime
     page_url: str
     page_title: str
@@ -166,6 +222,8 @@ class BrokerTelemetryEventRead(BaseModel):
     platform: str
     broker_adapter: str
     observation_key: str
+    extension_session_key: str | None = None
+    trading_session_id: int | None = None
     page_url: str
     page_title: str
     occurred_at: datetime
@@ -200,6 +258,35 @@ class BrokerTelemetryLatestRead(BaseModel):
     status: BrokerTelemetryLiveStatus
 
     model_config = ConfigDict(from_attributes=True)
+
+
+TradeEvidenceStage = Literal["intent_observed", "execution_likely", "execution_confirmed"]
+
+
+class TradeEvidenceRead(BaseModel):
+    id: int
+    event_id: str
+    event_type: BrokerTelemetryEventType
+    occurred_at: datetime
+    broker_adapter: str
+    broker_profile: str | None = None
+    symbol: str | None = None
+    side: str | None = None
+    order_type: str | None = None
+    quantity: float | None = None
+    price: float | None = None
+    confidence: float
+    evidence_stage: TradeEvidenceStage
+    raw_signal_summary: str
+    extension_session_key: str | None = None
+    trading_session_id: int | None = None
+    page_url: str
+    page_title: str
+    details: dict[str, Any] | None = None
+
+
+class TradeEvidenceListResponse(BaseModel):
+    events: list[TradeEvidenceRead]
 
 
 class BrokerTelemetryLatestResponse(BaseModel):

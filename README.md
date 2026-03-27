@@ -143,6 +143,48 @@ Example same-origin setup behind a reverse proxy:
 
 Environment templates are included at [.env.example](/C:/Users/higgo/Dev/Tilt-Guard/.env.example) and [frontend/.env.example](/C:/Users/higgo/Dev/Tilt-Guard/frontend/.env.example).
 
+## Product And Architecture Memory
+
+The project now keeps a durable record of product and technical lessons in:
+
+- [docs/tilt_guard_product_learning_log.md](/home/higgo/code/Tilt-Guard/docs/tilt_guard_product_learning_log.md)
+
+Read that file before making major changes to:
+- extension architecture
+- TradingView telemetry
+- broker adapters
+- dashboard live-state UX
+- rules or enforcement planning
+
+It captures:
+- the useful product/architecture patterns learned from reviewing Drop-Trades / TradeGuard
+- the patterns we intentionally adopted for Tilt-Guard
+- the patterns we intentionally avoided
+- the live-debugging lessons from our own TradingView-first extension work
+
+## Current Practical State
+
+Tilt-Guard is now in practical-use rollout preparation for the current Phase 2 slice.
+
+What is true now:
+- the hosted journal is usable
+- the extension runtime/connect/heartbeat path is working
+- chart-first confirmation is the intended primary path for confirmed observed trade facts
+- TradingView chart action evidence and chart-visible execution toast/overlay confirmation are live-proven
+- confirmed observed trades can persist into the journal and use the same reflection prompt flow as manual trades
+- confirmed observed trades attach to the live journal session even if the trader changes symbol mid-session
+- `System Status` owns low-level evidence, activity, mismatch context, and reconciliation audit detail
+
+Important truth rules:
+- confirmed observed browser/platform facts win for factual trade fields when confidence is strong enough
+- `Positions` is support/fallback evidence, not the main confirmation surface
+- manual input remains important for narrative, rationale, psychology, and fallback truth when confirmation is weak
+
+Current practical limitations:
+- the generic TradingView adapter is still honest but not final broker truth for every workflow
+- rapid same-symbol delta/re-entry behavior is still more ambiguous than clean open/close flows
+- extension distribution is still unpacked-folder based for testing and rollout
+
 ## Database Migrations
 
 Tilt-Guard now uses Alembic for schema management.
@@ -184,7 +226,8 @@ python -m alembic stamp 20260320_0001
 python -m alembic upgrade head
 ```
 
-- for the `phase2-telemetry` rollout, this upgrade must apply migration `20260321_0002` before or alongside the backend deploy
+- current repo head is `20260326_0005`
+- the practical-use rollout requires Railway to be at `20260326_0005` before the backend deploy for the current code
 - safest hosted rollout order for this release:
   - `python -m alembic upgrade head`
   - backend deploy
@@ -239,8 +282,8 @@ Default behavior:
 - the backend now serves `/extension/connect` directly so the extension can connect against the live Railway origin without a separate frontend route
 
 For this release:
-- no Alembic migration is required because there are no schema changes
-- deploy the backend code before treating the extension as user-ready, because `/extension/connect` must be live on Railway first
+- schema-changing releases should still run `python -m alembic upgrade head` before or alongside backend deploys
+- deploy the backend code before treating the extension as user-ready, because `/extension/connect` and extension-session APIs must be live on Railway first
 
 ```bash
 python3 scripts/build_extension.py \
@@ -252,6 +295,16 @@ Build output for remote users:
 - only distribute [`extension/dist/unpacked/`](/home/higgo/code/Tilt-Guard/extension/dist/unpacked)
 - do not send old `extension/dist/hosted/` or `extension/dist/local/` artifacts
 - do not send the raw [`extension/`](/home/higgo/code/Tilt-Guard/extension) source folder to non-technical users
+
+Important product/technical reminders from the current extension work:
+- keep the extension lightweight and session-oriented rather than turning it into a second app
+- treat backend extension session status as the source of truth for dashboard connection state
+- keep symbol/session metadata in live session UI surfaces, not in the main journal log
+- keep system and telemetry activity in a separate activity feed
+- do not rely on page refresh as a normal TradingView recovery path because reload can restore a previously saved chart state
+- keep chart-visible position/confirmation surfaces as the primary truth path where TradingView genuinely exposes them
+- treat `Positions` as support/fallback, not the main confirmation surface
+- keep reconciliation/provenance detail on `System Status`, not in the main journal
 
 To authenticate the extension:
 - open the popup

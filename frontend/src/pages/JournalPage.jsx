@@ -8,16 +8,17 @@ import { JournalConsole } from "../components/JournalConsole";
 import { LiveTradingStatus } from "../components/LiveTradingStatus";
 import { LoadingView } from "../components/LoadingView";
 import { ScreenshotGallery } from "../components/ScreenshotGallery";
-import { SystemActivityFeed } from "../components/SystemActivityFeed";
 import { useAuth } from "../context/AuthContext";
 import {
+  deriveTradeEvidenceEpisodes,
+  deriveObservedTradeJournalEntries,
   getLiveAccountName,
   getLiveBrokerLabel,
   getLiveSymbol,
   getUnifiedMonitoringStatusCopy,
-  useBrokerSystemFeed,
   useExtensionSessionStatus,
   useLatestBrokerTelemetry,
+  useTradeEvidenceFeed,
 } from "../lib/brokerTelemetry";
 import {
   closeTrade,
@@ -29,6 +30,8 @@ import {
   fetchSessionDetail,
   fetchTradeEvents,
   openTrade,
+  syncObservedTrade,
+  updateTradeNote,
   updateSessionSetup,
   uploadScreenshot,
 } from "../lib/api";
@@ -130,6 +133,17 @@ const GUIDED_WORKFLOWS = {
       },
     },
   ],
+  reflect_open: [
+    {
+      key: "note",
+      label: "Why this trade?",
+      placeholder: "context, setup reason, emotion, or press Enter to skip",
+      optional: true,
+      parse(value) {
+        return value.trim();
+      },
+    },
+  ],
   close: [
     {
       key: "size",
@@ -159,6 +173,17 @@ const GUIDED_WORKFLOWS = {
       key: "note",
       label: "Optional note",
       placeholder: "optional context, or press Enter to skip",
+      optional: true,
+      parse(value) {
+        return value.trim();
+      },
+    },
+  ],
+  reflect_close: [
+    {
+      key: "note",
+      label: "Why close here?",
+      placeholder: "exit reason, discipline, emotion, or press Enter to skip",
       optional: true,
       parse(value) {
         return value.trim();
@@ -234,17 +259,86 @@ function formatSessionRefreshError(failures) {
   return `Some session data could not be refreshed: ${failures.join(", ")}.`;
 }
 
+function normalizeSymbol(symbol) {
+  return (symbol || "").trim().toUpperCase();
+}
+
+function sizesAreCompatible(left, right) {
+  if (!Number.isFinite(left) || !Number.isFinite(right)) {
+    return true;
+  }
+
+  return Math.abs(left - right) <= Math.max(1, Math.round(Math.max(left, right) * 0.25));
+}
+
+function isOpenLikeTradeEventType(eventType) {
+  return eventType === "OPEN" || eventType === "ADD";
+}
+
+function isCloseLikeTradeEventType(eventType) {
+  return eventType === "REDUCE" || eventType === "CLOSE";
+}
+
+function matchesRequestedTradeEventType(eventType, requestedEventType = null) {
+  if (!requestedEventType) {
+    return true;
+  }
+
+  if (requestedEventType === "OPEN") {
+    return isOpenLikeTradeEventType(eventType);
+  }
+
+  if (requestedEventType === "CLOSE") {
+    return isCloseLikeTradeEventType(eventType);
+  }
+
+  return eventType === requestedEventType;
+}
+
+function hasInterveningOppositeTrade(tradeEvents, candidate, cutoffTimeMs) {
+  const candidateTime = Date.parse(candidate.event_time);
+  if (!Number.isFinite(candidateTime)) {
+    return false;
+  }
+
+  const candidateSymbol = normalizeSymbol(candidate.symbol);
+
+  return tradeEvents.some((event) => {
+    const isOppositeEventType = isOpenLikeTradeEventType(candidate.event_type)
+      ? isCloseLikeTradeEventType(event.event_type)
+      : isOpenLikeTradeEventType(event.event_type);
+
+    if (event.id === candidate.id || !isOppositeEventType) {
+      return false;
+    }
+
+    const eventTime = Date.parse(event.event_time);
+    if (!Number.isFinite(eventTime) || eventTime <= candidateTime || eventTime > cutoffTimeMs) {
+      return false;
+    }
+
+    const eventSymbol = normalizeSymbol(event.symbol);
+    if (candidateSymbol && eventSymbol && eventSymbol !== candidateSymbol) {
+      return false;
+    }
+
+    return true;
+  });
+}
+
 export function JournalPage() {
   const navigate = useNavigate();
   const commandInputRef = useRef(null);
   const filePickerRef = useRef(null);
   const filePickerModeRef = useRef("journal");
   const logRef = useRef(null);
+  const promptedObservedTradeIdsRef = useRef(new Set());
+  const syncingObservedEpisodeIdsRef = useRef(new Set());
   const { sessionId } = useParams();
   const { token } = useAuth();
   const liveTelemetry = useLatestBrokerTelemetry(token);
   const extensionSession = useExtensionSessionStatus(token);
-  const brokerSystemFeed = useBrokerSystemFeed(token, 16);
+  const tradeEvidenceFeed = useTradeEvidenceFeed(token, { limit: 12, tradingSessionId: Number(sessionId) });
   const [session, setSession] = useState(null);
   const [journalEntries, setJournalEntries] = useState([]);
   const [tradeEvents, setTradeEvents] = useState([]);
@@ -262,6 +356,14 @@ export function JournalPage() {
   const [preSessionScreenshotUpload, setPreSessionScreenshotUpload] = useState(null);
   const [isPreSessionScreenshotUploading, setIsPreSessionScreenshotUploading] = useState(false);
 
+  const observedTradeEpisodes = useMemo(
+    () => deriveTradeEvidenceEpisodes(tradeEvidenceFeed.events),
+    [tradeEvidenceFeed.events],
+  );
+  const observedTradeCandidates = useMemo(
+    () => deriveObservedTradeJournalEntries(observedTradeEpisodes, tradeEvents, { sessionSymbol: session?.symbol }),
+    [observedTradeEpisodes, session?.symbol, tradeEvents],
+  );
   const feed = useMemo(
     () => buildFeed(journalEntries, tradeEvents, screenshots),
     [journalEntries, screenshots, tradeEvents],
@@ -512,6 +614,14 @@ export function JournalPage() {
     }
   }, [feed, systemLines, workflow]);
 
+  function upsertTradeEventState(nextEvent) {
+    setTradeEvents((current) =>
+      [...current.filter((event) => event.id !== nextEvent.id), nextEvent].sort(
+        (left, right) => new Date(left.event_time) - new Date(right.event_time),
+      ),
+    );
+  }
+
   useEffect(() => {
     if (!isLoading && session?.status === "open") {
       focusConsoleInput();
@@ -529,29 +639,168 @@ export function JournalPage() {
     }
   }, [isLoading, session, workflow]);
 
-  function startWorkflow(type) {
+  function startWorkflow(type, options = {}) {
+    const {
+      stepIndex = 0,
+      values = {},
+      tradeEventId = null,
+      transcriptText = null,
+    } = options;
     setActionError("");
     setPanelMode(null);
     logClientEvent("info", "guided_action_started", { type });
     setWorkflow({
       type,
-      stepIndex: 0,
-      values: {},
+      stepIndex,
+      values,
+      tradeEventId,
       transcript: [
         {
           id: `start-${Date.now()}`,
           kind: "system",
           timestamp: new Date().toISOString(),
           text:
-            type === "setup"
+            transcriptText ||
+            (type === "setup"
               ? "Opening session setup started"
-              : `Trade ${type} entry started`,
+              : type === "open"
+                ? "Trade open entry started"
+                : type === "close"
+                  ? "Trade close entry started"
+                  : type === "reflect_open"
+                    ? "Observed trade open captured. Add the reflection note."
+                    : "Observed trade close captured. Add the reflection note."),
         },
       ],
     });
     setCommandInput("");
     focusConsoleInput();
   }
+
+  function startReflectionWorkflow(tradeEvent) {
+    if (!tradeEvent) {
+      return;
+    }
+
+    startWorkflow(isCloseLikeTradeEventType(tradeEvent.event_type) ? "reflect_close" : "reflect_open", {
+      tradeEventId: tradeEvent.id,
+    });
+  }
+
+  function findReflectableTrade(eventType = null) {
+    const now = Date.now();
+    return [...tradeEvents]
+      .sort((left, right) => new Date(right.event_time) - new Date(left.event_time))
+      .find((event) => {
+        if (!["observed", "merged"].includes(event.source)) {
+          return false;
+        }
+        if (event.note) {
+          return false;
+        }
+        if (!matchesRequestedTradeEventType(event.event_type, eventType)) {
+          return false;
+        }
+        if (hasInterveningOppositeTrade(tradeEvents, event, now)) {
+          return false;
+        }
+        return now - Date.parse(event.event_time) <= 5 * 60 * 1000;
+      });
+  }
+
+  function findMatchingObservedTradeForManualSubmit({ eventType, direction = null, size, symbol }) {
+    const normalizedSymbol = normalizeSymbol(symbol);
+    const normalizedDirection = (direction || "").trim().toLowerCase();
+    const now = Date.now();
+
+    return [...tradeEvents]
+      .sort((left, right) => new Date(right.event_time) - new Date(left.event_time))
+      .find((event) => {
+        if (!["observed", "merged"].includes(event.source)) {
+          return false;
+        }
+        if (!matchesRequestedTradeEventType(event.event_type, eventType)) {
+          return false;
+        }
+        if (event.note) {
+          return false;
+        }
+        if (normalizedSymbol && normalizeSymbol(event.symbol) && normalizeSymbol(event.symbol) !== normalizedSymbol) {
+          return false;
+        }
+        if (normalizedDirection && event.direction && event.direction !== normalizedDirection) {
+          return false;
+        }
+        if (!sizesAreCompatible(event.size, size)) {
+          return false;
+        }
+        if (hasInterveningOppositeTrade(tradeEvents, event, now)) {
+          return false;
+        }
+        return now - Date.parse(event.event_time) <= 5 * 60 * 1000;
+      });
+  }
+
+  useEffect(() => {
+    if (!token || !session || session.status !== "open") {
+      return undefined;
+    }
+
+    let cancelled = false;
+
+    async function syncObservedTradeCandidates() {
+      for (const candidate of observedTradeCandidates) {
+        const observedEpisodeId = candidate.observed_episode_id;
+        if (!observedEpisodeId || syncingObservedEpisodeIdsRef.current.has(observedEpisodeId)) {
+          continue;
+        }
+
+        syncingObservedEpisodeIdsRef.current.add(observedEpisodeId);
+        try {
+          const syncedTradeEvent = await syncObservedTrade(token, sessionId, {
+            observed_episode_id: observedEpisodeId,
+            event_type: candidate.event_type,
+            symbol: candidate.symbol,
+            direction: candidate.direction,
+            size: candidate.size,
+            event_time: candidate.event_time,
+            result_gbp: candidate.result_gbp,
+            note: null,
+          });
+          if (!cancelled) {
+            upsertTradeEventState(syncedTradeEvent);
+          }
+        } catch (error) {
+          logClientEvent("warn", "observed_trade_sync_failed", {
+            observedEpisodeId,
+            error: error.message,
+            status: error.status ?? null,
+          });
+        } finally {
+          syncingObservedEpisodeIdsRef.current.delete(observedEpisodeId);
+        }
+      }
+    }
+
+    void syncObservedTradeCandidates();
+    return () => {
+      cancelled = true;
+    };
+  }, [observedTradeCandidates, session, sessionId, token]);
+
+  useEffect(() => {
+    if (!session || session.status !== "open" || workflow) {
+      return;
+    }
+
+    const reflectableTrade = findReflectableTrade();
+    if (!reflectableTrade || promptedObservedTradeIdsRef.current.has(reflectableTrade.id)) {
+      return;
+    }
+
+    promptedObservedTradeIdsRef.current.add(reflectableTrade.id);
+    startReflectionWorkflow(reflectableTrade);
+  }, [session, tradeEvents, workflow]);
 
   async function getFreshPosition(reason) {
     const latestPosition = await fetchPosition(token, sessionId);
@@ -613,6 +862,12 @@ export function JournalPage() {
     logClientEvent("info", "guided_action_close_requested", { source });
 
     try {
+      const reflectableTrade = findReflectableTrade("CLOSE");
+      if (reflectableTrade) {
+        startReflectionWorkflow(reflectableTrade);
+        return;
+      }
+
       const latestPosition = await ensureCloseFlowAllowed(source);
       if (!latestPosition) {
         return;
@@ -635,7 +890,14 @@ export function JournalPage() {
 
     switch (normalized) {
       case "/open":
-        startWorkflow("open");
+        {
+          const reflectableTrade = findReflectableTrade("OPEN");
+          if (reflectableTrade) {
+            startReflectionWorkflow(reflectableTrade);
+            return;
+          }
+          startWorkflow("open");
+        }
         return;
       case "/close":
         await startCloseWorkflow("slash-command");
@@ -708,17 +970,54 @@ export function JournalPage() {
 
         setSession(updatedSession);
         setJournalEntries((current) => [...current, ...createdEntries]);
+      } else if (workflow.type === "reflect_open" || workflow.type === "reflect_close") {
+        const updatedTradeEvent = await updateTradeNote(
+          token,
+          sessionId,
+          workflow.tradeEventId,
+          nextValues.note || null,
+        );
+        upsertTradeEventState(updatedTradeEvent);
       } else {
+        const effectiveSymbol = liveSymbol || session?.symbol || null;
+        const matchingObservedTrade = findMatchingObservedTradeForManualSubmit({
+          eventType: workflow.type === "open" ? "OPEN" : "CLOSE",
+          direction: workflow.type === "open" ? nextValues.direction : null,
+          size: nextValues.size,
+          symbol: effectiveSymbol,
+        });
+
+        if (matchingObservedTrade) {
+          const updatedTradeEvent = await updateTradeNote(
+            token,
+            sessionId,
+            matchingObservedTrade.id,
+            nextValues.note || null,
+          );
+          upsertTradeEventState(updatedTradeEvent);
+          setPosition(await getFreshPosition(`${workflow.type}-merge-success`));
+          logClientEvent("info", "manual_trade_reconciled_with_observed_trade", {
+            tradeEventId: matchingObservedTrade.id,
+            type: workflow.type,
+          });
+          setWorkflow(null);
+          setCommandInput("");
+          focusConsoleInput();
+          return;
+        }
+
         const payload =
           workflow.type === "open"
             ? {
                 direction: nextValues.direction,
                 size: nextValues.size,
+                symbol: effectiveSymbol,
                 note: nextValues.note || undefined,
               }
             : {
                 size: nextValues.size,
                 result_gbp: nextValues.result_gbp,
+                symbol: effectiveSymbol,
                 note: nextValues.note || undefined,
               };
 
@@ -738,7 +1037,7 @@ export function JournalPage() {
             ? await openTrade(token, sessionId, payload)
             : await closeTrade(token, sessionId, payload);
 
-        setTradeEvents((current) => [...current, tradeEvent]);
+        upsertTradeEventState(tradeEvent);
         setPosition(await getFreshPosition(`${workflow.type}-submit-success`));
       }
 
@@ -1093,7 +1392,14 @@ export function JournalPage() {
               </Link>
               <Button
                 disabled={session.status !== "open" || isSubmitting}
-                onClick={() => startWorkflow("open")}
+                onClick={() => {
+                  const reflectableTrade = findReflectableTrade("OPEN");
+                  if (reflectableTrade) {
+                    startReflectionWorkflow(reflectableTrade);
+                    return;
+                  }
+                  startWorkflow("open");
+                }}
                 type="button"
                 variant="secondary"
               >
@@ -1129,6 +1435,11 @@ export function JournalPage() {
               >
                 Details
               </Button>
+              <Link to={`/sessions/${session.id}/system-status`}>
+                <Button type="button" variant="secondary">
+                  System Status
+                </Button>
+              </Link>
               <Button
                 className="journal-mode-toggle"
                 onClick={() => setViewMode("minimized")}
@@ -1149,7 +1460,6 @@ export function JournalPage() {
             </div>
           </section>
 
-          <SystemActivityFeed events={brokerSystemFeed.events} title="TradingView activity" />
         </>
       )}
 
