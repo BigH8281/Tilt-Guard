@@ -93,8 +93,8 @@ def session_has_screenshot_type(db: Session, session_id: int, screenshot_type: s
 
 def get_session_position_size(db: Session, session_id: int) -> int:
     position_delta = case(
-        (TradeEvent.event_type == "OPEN", TradeEvent.size),
-        (TradeEvent.event_type == "CLOSE", -TradeEvent.size),
+        (TradeEvent.event_type.in_(("OPEN", "ADD")), TradeEvent.size),
+        (TradeEvent.event_type.in_(("REDUCE", "CLOSE")), -TradeEvent.size),
         else_=0,
     )
     statement = select(func.coalesce(func.sum(position_delta), 0)).where(TradeEvent.session_id == session_id)

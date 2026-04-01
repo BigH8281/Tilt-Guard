@@ -10,6 +10,8 @@ from sqlalchemy.orm import Session, sessionmaker
 from app.db import Base, get_db
 from app.main import app
 from app.models.journal_entry import JournalEntry
+from app.models.screenshot import Screenshot
+from app.models.trade_event import TradeEvent
 from app.models.trading_session import TradingSession
 from app.models.user import User
 from app.security import create_access_token, hash_password
@@ -98,3 +100,71 @@ def test_close_trade_without_open_position_is_rejected_without_mutation(
         assert session.status == "open"
         assert len(session.trade_events) == 0
         assert db.scalar(select(func.count()).select_from(JournalEntry)) == 0
+
+
+def test_end_session_allows_flat_position_after_reduce_events(
+    test_context: tuple[TestClient, sessionmaker[Session]],
+) -> None:
+    client, testing_session_local = test_context
+    session_id, token = seed_open_session(testing_session_local)
+
+    with testing_session_local() as db:
+        db.add_all(
+            [
+                TradeEvent(
+                    session_id=session_id,
+                    event_type="OPEN",
+                    symbol="MNQ",
+                    direction="short",
+                    size=2,
+                    note="entry",
+                ),
+                TradeEvent(
+                    session_id=session_id,
+                    event_type="REDUCE",
+                    symbol="MNQ",
+                    direction=None,
+                    size=1,
+                    result_gbp=125.0,
+                    note="partial",
+                ),
+                TradeEvent(
+                    session_id=session_id,
+                    event_type="CLOSE",
+                    symbol="MNQ",
+                    direction=None,
+                    size=1,
+                    result_gbp=80.0,
+                    note="final close",
+                ),
+                Screenshot(
+                    session_id=session_id,
+                    screenshot_type="post",
+                    file_path="screenshots/test-post.png",
+                ),
+            ]
+        )
+        db.commit()
+
+    response = client.post(
+        f"/sessions/{session_id}/end",
+        headers={"Authorization": f"Bearer {token}"},
+        json={
+            "end_traded_my_time": True,
+            "end_traded_my_conditions": True,
+            "end_respected_my_exit": True,
+            "reason_time_no": "",
+            "reason_conditions_no": "",
+            "reason_exit_no": "",
+        },
+    )
+
+    assert response.status_code == 200
+    assert response.json()["status"] == "closed"
+    assert response.json()["closed_at"] is not None
+
+    with testing_session_local() as db:
+        session = db.get(TradingSession, session_id)
+        assert session is not None
+        assert session.status == "closed"
+        assert session.closed_at is not None

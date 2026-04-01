@@ -148,6 +148,7 @@ Environment templates are included at [.env.example](/C:/Users/higgo/Dev/Tilt-Gu
 The project now keeps a durable record of product and technical lessons in:
 
 - [docs/tilt_guard_product_learning_log.md](/home/higgo/code/Tilt-Guard/docs/tilt_guard_product_learning_log.md)
+- [docs/codex_browser_9222_recovery.md](/home/higgo/code/Tilt-Guard/docs/codex_browser_9222_recovery.md)
 
 Read that file before making major changes to:
 - extension architecture
@@ -161,6 +162,8 @@ It captures:
 - the patterns we intentionally adopted for Tilt-Guard
 - the patterns we intentionally avoided
 - the live-debugging lessons from our own TradingView-first extension work
+
+Use the browser recovery note when Codex loses browser control and the Chrome DevTools bridge on `9222` needs to be restored.
 
 ## Current Practical State
 
