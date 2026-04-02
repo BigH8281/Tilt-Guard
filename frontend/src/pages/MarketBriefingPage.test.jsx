@@ -250,4 +250,40 @@ describe("MarketBriefingPage", () => {
     expect(screen.getByText("Saved narrative")).toBeTruthy();
     expect(screen.getByText("Refresh failed")).toBeTruthy();
   });
+
+  it("disables chart requests when the backend marks charts unavailable", async () => {
+    fetchPreSessionBriefingCapabilities.mockResolvedValue({
+      service: { name: "pre-session-briefing", version: "0.2.0", api_version: "v1" },
+      markets: [{ id: "us-index-futures", label: "US index futures" }],
+      options: { include_snapshot: true, include_social: true, include_charts: false },
+    });
+    fetchCurrentPreSessionBriefing.mockResolvedValue(
+      buildBriefingResponse({
+        warnings: [],
+      }),
+    );
+    fetchPreSessionBriefing.mockResolvedValue(
+      buildBriefingResponse({
+        warnings: [],
+        charts: null,
+      }),
+    );
+
+    const user = userEvent.setup();
+    renderMarketBriefingPage();
+
+    await screen.findByText("Saved current");
+    expect(screen.getByLabelText("Chart images unavailable in this environment").disabled).toBe(true);
+    expect(screen.queryByRole("heading", { name: "Chart pack" })).toBeNull();
+
+    await user.click(screen.getByRole("button", { name: "Refresh briefing" }));
+
+    expect(fetchPreSessionBriefing).toHaveBeenCalledWith("test-token", {
+      market: "us-index-futures",
+      local_timezone: expect.any(String),
+      include_snapshot: true,
+      include_social: true,
+      include_charts: false,
+    });
+  });
 });

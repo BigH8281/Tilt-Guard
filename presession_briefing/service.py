@@ -30,6 +30,14 @@ def _build_chart_pack(*, symbols: list[str], timeframe_keys: list[str]) -> dict[
     return build_chart_pack(symbols=symbols, timeframe_keys=timeframe_keys)
 
 
+def _charting_available() -> bool:
+    try:
+        from .charts import build_chart_pack as _unused_build_chart_pack
+    except Exception:
+        return False
+    return True
+
+
 def _coerce_bool(value: Any, default: bool) -> bool:
     if value is None:
         return default
@@ -74,6 +82,7 @@ def service_metadata() -> dict[str, Any]:
 
 
 def service_capabilities() -> dict[str, Any]:
+    charting_available = _charting_available()
     return {
         "service": service_metadata(),
         "markets": [
@@ -86,9 +95,10 @@ def service_capabilities() -> dict[str, Any]:
         "options": {
             "include_snapshot": True,
             "include_social": True,
-            "include_charts": True,
+            "include_charts": charting_available,
         },
         "charts": {
+            "available": charting_available,
             "symbols": list(TRACKED_SYMBOLS.keys()),
             "timeframes": [config.key for config in CHART_CONFIGS],
         },
@@ -139,7 +149,7 @@ def generate_live_response(payload: dict[str, Any] | None = None) -> dict[str, A
     }
     if request["include_snapshot"]:
         response["snapshot"] = snapshot
-    if request["include_charts"]:
+    if request["include_charts"] and _charting_available():
         try:
             response["charts"] = _build_chart_pack(
                 symbols=request["chart_symbols"],

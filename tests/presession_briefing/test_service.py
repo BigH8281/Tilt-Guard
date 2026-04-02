@@ -79,12 +79,41 @@ class ServiceLayerTests(unittest.TestCase):
         self.assertEqual(response["source_health"]["quotes"]["status"], "degraded")
         build_chart_pack.assert_called_once()
 
+    @patch("presession_briefing.service._charting_available", return_value=False)
+    @patch("presession_briefing.service._build_chart_pack")
+    @patch("presession_briefing.service.generate_session_brief")
+    @patch("presession_briefing.service._build_live_snapshot")
+    def test_generate_live_response_skips_charts_when_runtime_is_unavailable(
+        self,
+        live_snapshot,
+        generate_brief,
+        build_chart_pack,
+        _charting_available,
+    ) -> None:
+        live_snapshot.return_value = {
+            "generated_at": "2026-03-27T00:00:00+00:00",
+            "_meta": {"warnings": [], "source_health": {"quotes": {"status": "ok", "warnings": []}}},
+        }
+        generate_brief.return_value = {"session_bias": "mixed"}
+
+        response = generate_live_response({"include_charts": True})
+
+        self.assertNotIn("charts", response)
+        self.assertNotIn("warnings", response)
+        build_chart_pack.assert_not_called()
+
     def test_service_capabilities_describes_api(self) -> None:
         capabilities = service_capabilities()
         self.assertEqual(capabilities["service"]["api_version"], "v1")
         self.assertEqual(capabilities["service"]["version"], "0.2.0")
         self.assertIn("US index futures", capabilities["markets"][0]["label"])
         self.assertIn("symbols", capabilities["charts"])
+
+    @patch("presession_briefing.service._charting_available", return_value=False)
+    def test_service_capabilities_flags_when_charting_is_unavailable(self, _charting_available) -> None:
+        capabilities = service_capabilities()
+        self.assertFalse(capabilities["options"]["include_charts"])
+        self.assertFalse(capabilities["charts"]["available"])
 
 
 if __name__ == "__main__":

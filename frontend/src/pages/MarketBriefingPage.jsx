@@ -448,8 +448,10 @@ export function MarketBriefingPage() {
   const [viewState, setViewState] = useState("empty");
   const [options, setOptions] = useState({
     includeSocial: true,
-    includeCharts: true,
+    includeCharts: false,
   });
+
+  const chartingAvailable = capabilities?.options?.include_charts !== false;
 
   useEffect(() => {
     let isActive = true;
@@ -470,6 +472,10 @@ export function MarketBriefingPage() {
 
       if (capabilitiesResult.status === "fulfilled") {
         setCapabilities(capabilitiesResult.value);
+        setOptions((current) => ({
+          ...current,
+          includeCharts: capabilitiesResult.value?.options?.include_charts !== false,
+        }));
       } else {
         setPageNotice(capabilitiesResult.reason.message);
       }
@@ -619,13 +625,14 @@ export function MarketBriefingPage() {
             </label>
             <label className="briefing-toggle">
               <input
+                disabled={!chartingAvailable}
                 checked={options.includeCharts}
                 onChange={(event) =>
                   setOptions((current) => ({ ...current, includeCharts: event.target.checked }))
                 }
                 type="checkbox"
               />
-              <span>Include chart images</span>
+              <span>{chartingAvailable ? "Include chart images" : "Chart images unavailable in this environment"}</span>
             </label>
             <div className="briefing-capabilities">
               <strong>{capabilities?.service?.name || "pre-session-briefing"}</strong>
@@ -787,7 +794,9 @@ export function MarketBriefingPage() {
             </SectionCard>
           </div>
 
-          <ChartSection charts={charts} isPersistedView={!hasCharts && viewState !== "fresh"} />
+          {hasCharts || chartingAvailable ? (
+            <ChartSection charts={charts} isPersistedView={!hasCharts && viewState !== "fresh"} />
+          ) : null}
         </>
       ) : (
         <EmptyState error={error} />
