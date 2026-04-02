@@ -1,0 +1,86 @@
+{
+  "generated_at": "2026-03-27T07:00:00Z",
+  "market_context": {
+    "region": "US",
+    "trading_date": "2026-03-27",
+    "session_label": "pre-market"
+  },
+  "macro": {
+    "spx_futures_pct": 0.65,
+    "ndx_futures_pct": 0.92,
+    "rty_futures_pct": 0.28,
+    "vix_pct": -6.4,
+    "us10y_yield_bps": -3.2,
+    "dxy_pct": -0.18,
+    "btc_pct": 1.4,
+    "overnight_moves": [
+      "Nikkei closed +1.2%",
+      "Stoxx Europe 600 opened +0.4%"
+    ],
+    "notes": [
+      "Bond yields eased after softer inflation data."
+    ]
+  },
+  "news": [
+    {
+      "headline": "Core inflation print cooled more than expected",
+      "sentiment": "positive",
+      "impact": "high",
+      "category": "macro"
+    },
+    {
+      "headline": "Major AI suppliers guided capex above consensus",
+      "sentiment": "positive",
+      "impact": "medium",
+      "category": "earnings"
+    },
+    {
+      "headline": "Energy markets remain sensitive to Middle East headlines",
+      "sentiment": "negative",
+      "impact": "medium",
+      "category": "geopolitics"
+    }
+  ],
+  "sector_flows": [
+    {
+      "sector": "Semiconductors",
+      "direction": "positive",
+      "strength": 0.92,
+      "reason": "AI capex and growth leadership"
+    },
+    {
+      "sector": "Software",
+      "direction": "positive",
+      "strength": 0.61,
+      "reason": "duration bid as yields soften"
+    },
+    {
+      "sector": "Utilities",
+      "direction": "negative",
+      "strength": 0.58,
+      "reason": "defensives lagging in a stronger tape"
+    }
+  ],
+  "social": {
+    "enabled": true,
+    "sentiment_score": 0.22,
+    "summary_points": [
+      "Retail chatter is leaning into megacap tech strength."
+    ],
+    "caution_flags": [
+      "Meme names are seeing unusually crowded attention."
+    ]
+  },
+  "risk_flags": [
+    {
+      "name": "Fed speaker at 13:30 London / 8:30 ET",
+      "severity": "high",
+      "kind": "central_bank"
+    },
+    {
+      "name": "Quarter-end positioning may distort the first hour",
+      "severity": "medium",
+      "kind": "positioning"
+    }
+  ]
+}

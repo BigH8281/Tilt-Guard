@@ -8,6 +8,7 @@ import { AuthPage } from "./pages/AuthPage";
 import { DashboardPage } from "./pages/DashboardPage";
 import { ExtensionConnectPage } from "./pages/ExtensionConnectPage";
 import { JournalPage } from "./pages/JournalPage";
+import { MarketBriefingPage } from "./pages/MarketBriefingPage";
 import { SystemStatusPage } from "./pages/SystemStatusPage";
 
 function ProtectedRoute({ children }) {
@@ -64,6 +65,16 @@ export default function App() {
           <ProtectedRoute>
             <AppShell>
               <SystemStatusPage />
+            </AppShell>
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/market-briefing"
+        element={
+          <ProtectedRoute>
+            <AppShell>
+              <MarketBriefingPage />
             </AppShell>
           </ProtectedRoute>
         }

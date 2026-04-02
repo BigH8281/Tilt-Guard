@@ -259,6 +259,36 @@ export async function fetchBrokerSystemFeed(token, limit = 20) {
   return response.events;
 }
 
+export function fetchPreSessionBriefing(token, payload) {
+  return request("/pre-session-briefing/live", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      ...authHeaders(token),
+    },
+    body: JSON.stringify(payload),
+  });
+}
+
+export function fetchPreSessionBriefingCapabilities(token) {
+  return request("/pre-session-briefing/capabilities", {
+    headers: authHeaders(token),
+  });
+}
+
+export async function fetchCurrentPreSessionBriefing(token) {
+  try {
+    return await request("/pre-session-briefing/current", {
+      headers: authHeaders(token),
+    });
+  } catch (error) {
+    if (error.status === 404) {
+      return null;
+    }
+    throw error;
+  }
+}
+
 export async function fetchTradeEvidenceFeed(token, { limit = 20, tradingSessionId = null, brokerAdapter = null } = {}) {
   const params = new URLSearchParams({ limit: String(limit) });
   if (tradingSessionId) {

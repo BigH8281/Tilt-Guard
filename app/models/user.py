@@ -8,6 +8,7 @@ from app.db import Base
 
 if TYPE_CHECKING:
     from app.models.broker_telemetry_event import BrokerTelemetryEvent
+    from app.models.current_pre_session_briefing import CurrentPreSessionBriefing
     from app.models.extension_session import ExtensionSession
     from app.models.trading_session import TradingSession
 
@@ -31,4 +32,9 @@ class User(Base):
     extension_sessions: Mapped[list["ExtensionSession"]] = relationship(
         back_populates="user",
         cascade="all, delete-orphan",
+    )
+    current_pre_session_briefing: Mapped["CurrentPreSessionBriefing | None"] = relationship(
+        back_populates="user",
+        cascade="all, delete-orphan",
+        uselist=False,
     )

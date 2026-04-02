@@ -1,5 +1,5 @@
 import { useEffect, useRef } from "react";
-import { useNavigate } from "react-router-dom";
+import { NavLink, useNavigate } from "react-router-dom";
 
 import { useAuth } from "../context/AuthContext";
 import { fetchExtensionSessionStatus } from "../lib/api";
@@ -74,6 +74,17 @@ export function AppShell({ children }) {
         <div>
           <p className="eyebrow">Tilt Guard</p>
           <h1>Trading journal</h1>
+          <nav className="topbar-nav" aria-label="Primary">
+            <NavLink className={({ isActive }) => `topbar-nav-link${isActive ? " active" : ""}`} to="/">
+              Dashboard
+            </NavLink>
+            <NavLink
+              className={({ isActive }) => `topbar-nav-link${isActive ? " active" : ""}`}
+              to="/market-briefing"
+            >
+              Market briefing
+            </NavLink>
+          </nav>
         </div>
         <div className="topbar-actions">
           <div className="user-chip">

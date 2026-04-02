@@ -213,13 +213,20 @@ export function DashboardPage() {
           <p className="eyebrow">Trading Journal</p>
           <h2>Operational board</h2>
         </div>
-        <Button
-          disabled={Boolean(openSession)}
-          onClick={() => setIsModalOpen(true)}
-          type="button"
-        >
-          {openSession ? "Session active" : "New session"}
-        </Button>
+        <div className="toolbar-row">
+          <Link to="/market-briefing">
+            <Button type="button" variant="secondary">
+              Market briefing
+            </Button>
+          </Link>
+          <Button
+            disabled={Boolean(openSession)}
+            onClick={() => setIsModalOpen(true)}
+            type="button"
+          >
+            {openSession ? "Session active" : "New session"}
+          </Button>
+        </div>
       </section>
 
       {openSession ? (

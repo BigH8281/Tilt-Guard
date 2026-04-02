@@ -141,6 +141,7 @@ describe("DashboardPage resilience", () => {
     expect(screen.getByText("FXCM Live")).toBeTruthy();
     expect(screen.getByText("2 open contracts")).toBeTruthy();
     expect(screen.getByText("Resume")).toBeTruthy();
+    expect(screen.getByRole("link", { name: "Market briefing" }).getAttribute("href")).toBe("/market-briefing");
     expect(
       screen.getByText("Session history: Invalid or missing authentication credentials."),
     ).toBeTruthy();

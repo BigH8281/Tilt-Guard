@@ -165,6 +165,25 @@ It captures:
 
 Use the browser recovery note when Codex loses browser control and the Chrome DevTools bridge on `9222` needs to be restored.
 
+## Pre-Session Briefing
+
+Tilt Guard now includes a self-contained pre-session briefing package at [presession_briefing](/home/higgo/code/Tilt-Guard/presession_briefing).
+
+Stable integration seams:
+- deterministic core only: `from presession_briefing.orchestrator import generate_session_brief`
+- live bundle: `from presession_briefing.service import generate_live_response`
+- TG API route: authenticated `POST /pre-session-briefing/live`
+- TG frontend entry point: dashboard `Live market briefing` panel
+
+Security and integration notes:
+- live and generated briefing text is rendered as text nodes in the standalone UI; untrusted feed content is not injected through `innerHTML`
+- static asset serving in the standalone server is locked to the package `static/` root
+- optional chart rendering stays lazy; `matplotlib` and `mplfinance` are only required when `include_charts=true`
+- the first TG-integrated release does not request charts from the dashboard path, so chart dependencies remain optional for production unless you explicitly enable chart responses
+
+Runtime live-data dependencies are declared in [requirements.txt](/home/higgo/code/Tilt-Guard/requirements.txt).
+Optional chart dependencies and the aligned package version are declared in [presession_briefing/pyproject.toml](/home/higgo/code/Tilt-Guard/presession_briefing/pyproject.toml).
+
 ## Current Practical State
 
 Tilt-Guard is now in practical-use rollout preparation for the current Phase 2 slice.
