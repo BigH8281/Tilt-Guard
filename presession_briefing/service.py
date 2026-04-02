@@ -32,7 +32,9 @@ def _build_chart_pack(*, symbols: list[str], timeframe_keys: list[str]) -> dict[
 
 def _charting_available() -> bool:
     try:
-        from .charts import build_chart_pack as _unused_build_chart_pack
+        from .charts import _load_chart_dependencies
+
+        _load_chart_dependencies()
     except Exception:
         return False
     return True
